@@ -1,0 +1,26 @@
+name: Run Clang Format Test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+jobs:
+  run-test:
+    name: Verify code formatting
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install clang-format
+        run: pip install clang-format
+
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: cd into project directory
+        run: cd rigg
+
+      - name: Run clang-format
+        run: clang-format --dry-run -Werror include/*.h source/*.c
+

@@ -1,0 +1,24 @@
+name: Run Tests
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: cd into project directory
+      run: cd riggc
+
+    - name: Run test script
+      run: |
+        cd tests
+        ./run_tests.sh
+
