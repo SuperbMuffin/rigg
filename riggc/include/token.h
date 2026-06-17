@@ -15,6 +15,7 @@ typedef enum
   TOK_BREAK,
   TOK_CONTINUE,
   TOK_EXTERN,
+  TOK_VAR,
   TOK_TRUE,
   TOK_FALSE,
 
@@ -30,6 +31,7 @@ typedef enum
   TOK_F64,
   TOK_BOOL,
   TOK_STR,
+  TOK_PTR,
 
   TOK_INT_LIT,
   TOK_FLOAT_LIT,

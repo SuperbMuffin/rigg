@@ -19,6 +19,7 @@ typedef enum
   TYPE_F64,
   TYPE_BOOL,
   TYPE_STR,
+  TYPE_PTR,
   TYPE_VOID,
   TYPE_UNKNOWN, /* sentinel: type could not be inferred */
 } TypeKind;
@@ -184,8 +185,15 @@ typedef struct
   int line;
 } FnDecl;
 
+typedef enum
+{
+  EXTERN_FN,
+  EXTERN_VAR
+} ExternKind;
+
 typedef struct
 {
+  ExternKind kind;
   const char *name;
   int name_len;
   Param *params;

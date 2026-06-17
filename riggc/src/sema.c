@@ -112,6 +112,7 @@ static void check_entry_point(const Project *proj, SemaResult *res)
                         : main_fn->return_type == TYPE_F64  ? "f64"
                         : main_fn->return_type == TYPE_BOOL ? "bool"
                         : main_fn->return_type == TYPE_STR  ? "str"
+                        : main_fn->return_type == TYPE_PTR  ? "ptr"
                                                             : "?"),
                xstrdup("Invalid main signature"));
   }
@@ -571,6 +572,8 @@ static const char *type_str(TypeKind t)
       return "bool";
     case TYPE_STR:
       return "str";
+    case TYPE_PTR:
+      return "ptr";
     case TYPE_VOID:
       return "void";
     default:
@@ -605,20 +608,41 @@ typedef struct
 
 typedef struct
 {
-  FnSymbol *syms;
-  int count;
-  int cap;
+  int concept_idx;
+  const char *name;
+  int name_len;
+  TypeKind type;
+} GlobalVarSymbol;
+
+typedef struct
+{
+  FnSymbol *fn_syms;
+  int fn_count;
+  int fn_cap;
+  GlobalVarSymbol *var_syms;
+  int var_count;
+  int var_cap;
   const Project *proj;
 } SymTable;
 
-static void symtable_push(SymTable *t, FnSymbol s)
+static void symtable_push_fn(SymTable *t, FnSymbol s)
 {
-  if (t->count == t->cap)
+  if (t->fn_count == t->fn_cap)
   {
-    t->cap = t->cap ? t->cap * 2 : 32;
-    t->syms = util_xrealloc(t->syms, (size_t) t->cap * sizeof(FnSymbol));
+    t->fn_cap = t->fn_cap ? t->fn_cap * 2 : 32;
+    t->fn_syms = util_xrealloc(t->fn_syms, (size_t) t->fn_cap * sizeof(FnSymbol));
   }
-  t->syms[t->count++] = s;
+  t->fn_syms[t->fn_count++] = s;
+}
+
+static void symtable_push_var(SymTable *t, GlobalVarSymbol s)
+{
+  if (t->var_count == t->var_cap)
+  {
+    t->var_cap = t->var_cap ? t->var_cap * 2 : 32;
+    t->var_syms = util_xrealloc(t->var_syms, (size_t) t->var_cap * sizeof(GlobalVarSymbol));
+  }
+  t->var_syms[t->var_count++] = s;
 }
 
 static void symtable_build(const Project *proj, SymTable *t)
@@ -642,35 +666,59 @@ static void symtable_build(const Project *proj, SymTable *t)
         s.param_count = fn->param_count;
         s.return_type = fn->return_type;
         s.is_variadic = 0;
-        symtable_push(t, s);
+        symtable_push_fn(t, s);
       }
-      /* Externs are callable within the concept like any local function */
+      /* Externs are callable/accessible within the concept like any local fn/var */
       for (int k = 0; k < sf->program.extern_count; k++)
       {
         const ExternDecl *ex = &sf->program.externs[k];
-        FnSymbol s;
-        s.concept_idx = i;
-        s.name = ex->name;
-        s.name_len = ex->name_len;
-        s.params = ex->params;
-        s.param_count = ex->param_count;
-        s.return_type = ex->return_type;
-        s.is_variadic = ex->is_variadic;
-        symtable_push(t, s);
+        if (ex->kind == EXTERN_VAR)
+        {
+          GlobalVarSymbol s;
+          s.concept_idx = i;
+          s.name = ex->name;
+          s.name_len = ex->name_len;
+          s.type = ex->return_type;
+          symtable_push_var(t, s);
+        }
+        else
+        {
+          FnSymbol s;
+          s.concept_idx = i;
+          s.name = ex->name;
+          s.name_len = ex->name_len;
+          s.params = ex->params;
+          s.param_count = ex->param_count;
+          s.return_type = ex->return_type;
+          s.is_variadic = ex->is_variadic;
+          symtable_push_fn(t, s);
+        }
       }
     }
   }
 }
 
 /* Look up an unqualified call within a concept (all .fn and .impl fns). */
-static const FnSymbol *symtable_lookup_local(const SymTable *t, int concept_idx, const char *name,
-                                             int name_len)
+static const FnSymbol *symtable_lookup_local_fn(const SymTable *t, int concept_idx,
+                                                const char *name, int name_len)
 {
-  for (int i = 0; i < t->count; i++)
+  for (int i = 0; i < t->fn_count; i++)
   {
-    if (t->syms[i].concept_idx == concept_idx && t->syms[i].name_len == name_len &&
-        memcmp(t->syms[i].name, name, (size_t) name_len) == 0)
-      return &t->syms[i];
+    if (t->fn_syms[i].concept_idx == concept_idx && t->fn_syms[i].name_len == name_len &&
+        memcmp(t->fn_syms[i].name, name, (size_t) name_len) == 0)
+      return &t->fn_syms[i];
+  }
+  return NULL;
+}
+
+static const GlobalVarSymbol *symtable_lookup_local_var(const SymTable *t, int concept_idx,
+                                                        const char *name, int name_len)
+{
+  for (int i = 0; i < t->var_count; i++)
+  {
+    if (t->var_syms[i].concept_idx == concept_idx && t->var_syms[i].name_len == name_len &&
+        memcmp(t->var_syms[i].name, name, (size_t) name_len) == 0)
+      return &t->var_syms[i];
   }
   return NULL;
 }
@@ -678,16 +726,14 @@ static const FnSymbol *symtable_lookup_local(const SymTable *t, int concept_idx,
 /* Look up a qualified call: concept::fn. Only matches the primary exported
    function (last fn in a .fn file matching the stem) — import checking has
    already verified the call is legal, so we just need the type. */
-static const FnSymbol *symtable_lookup_qual(const SymTable *t, int concept_idx, const char *name,
-                                            int name_len)
+static const FnSymbol *symtable_lookup_qual_fn(const SymTable *t, int concept_idx, const char *name,
+                                               int name_len)
 {
-  /* Prefer exact match on concept_idx — import checker already validated
-     the target, so the first match is the right one. */
-  for (int i = 0; i < t->count; i++)
+  for (int i = 0; i < t->fn_count; i++)
   {
-    if (t->syms[i].concept_idx == concept_idx && t->syms[i].name_len == name_len &&
-        memcmp(t->syms[i].name, name, (size_t) name_len) == 0)
-      return &t->syms[i];
+    if (t->fn_syms[i].concept_idx == concept_idx && t->fn_syms[i].name_len == name_len &&
+        memcmp(t->fn_syms[i].name, name, (size_t) name_len) == 0)
+      return &t->fn_syms[i];
   }
   return NULL;
 }
@@ -776,9 +822,17 @@ static TypeKind infer_expr(const Expr *e, const FnDecl *fn, Scope *scope, const 
     {
       /* Fix #2: use the dedicated ident field, not the sval alias */
       VarEntry *v = scope_lookup(scope, e->as.ident.ptr, e->as.ident.len);
-      if (!v)
-        return TYPE_UNKNOWN;
-      return v->type;
+      if (v)
+        return v->type;
+      const GlobalVarSymbol *gv =
+          symtable_lookup_local_var(symt, concept_idx, e->as.ident.ptr, e->as.ident.len);
+      if (gv)
+        return gv->type;
+      push_error(res, "I005", rel_path, e->line,
+                 xsprintf("'%.*s' is not defined in this concept.", e->as.ident.len,
+                          e->as.ident.ptr),
+                 xsprintf("Unknown identifier '%.*s'", e->as.ident.len, e->as.ident.ptr));
+      return TYPE_UNKNOWN;
     }
 
     case EXPR_ASSIGN:
@@ -914,7 +968,7 @@ static TypeKind infer_expr(const Expr *e, const FnDecl *fn, Scope *scope, const 
     case EXPR_CALL:
     {
       const FnSymbol *sym =
-          symtable_lookup_local(symt, concept_idx, e->as.call.name, e->as.call.name_len);
+          symtable_lookup_local_fn(symt, concept_idx, e->as.call.name, e->as.call.name_len);
       if (!sym)
       {
         push_error(res, "I005", rel_path, e->line,
@@ -934,7 +988,7 @@ static TypeKind infer_expr(const Expr *e, const FnDecl *fn, Scope *scope, const 
       if (tgt_idx < 0)
         return TYPE_UNKNOWN;
       const FnSymbol *sym =
-          symtable_lookup_qual(symt, tgt_idx, e->as.qual_call.name, e->as.qual_call.name_len);
+          symtable_lookup_qual_fn(symt, tgt_idx, e->as.qual_call.name, e->as.qual_call.name_len);
       if (!sym)
         return TYPE_UNKNOWN;
       check_call_args(&e->as.qual_call.args, sym, fn, scope, rel_path, e->line, symt, concept_idx,
@@ -1165,7 +1219,8 @@ static void check_types(const Project *proj, SemaResult *res)
     }
   }
 
-  free(symt.syms);
+  free(symt.fn_syms);
+  free(symt.var_syms);
 }
 
 void sema_check(const Project *proj, SemaResult *res)

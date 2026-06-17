@@ -1,1 +1,4 @@
 extern fn printf(fmt: str, ...) -> i32;
+
+extern fn fprintf(stream: ptr, fmt: str, ...) -> i32;
+extern var stderr: ptr;

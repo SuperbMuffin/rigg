@@ -1,0 +1,4 @@
+fn eprintln(s: str)
+{
+    fprintf(stderr, "%s\n", s);
+}

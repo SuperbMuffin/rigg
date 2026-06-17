@@ -175,6 +175,9 @@ static int parse_type(Parser *p, TypeKind *out)
     case TOK_STR:
       *out = TYPE_STR;
       break;
+    case TOK_PTR:
+      *out = TYPE_PTR;
+      break;
     default:
       push_error(p, p->current.line, "T002", "expected a type but got '%.*s'", p->current.len,
                  p->current.start);
@@ -647,8 +650,22 @@ static ExternDecl parse_extern(Parser *p)
 {
   ExternDecl e = {0};
   expect(p, TOK_EXTERN, "'extern'");
-  expect(p, TOK_FN, "'fn'");
   e.line = p->current.line;
+
+  if (match(p, TOK_VAR))
+  {
+    e.kind = EXTERN_VAR;
+    e.name = p->current.start;
+    e.name_len = p->current.len;
+    expect(p, TOK_IDENT, "variable name");
+    expect(p, TOK_COLON, "':'");
+    parse_type(p, &e.return_type);
+    expect(p, TOK_SEMI, "';'");
+    return e;
+  }
+
+  expect(p, TOK_FN, "'fn'");
+  e.kind = EXTERN_FN;
   e.name = p->current.start;
   e.name_len = p->current.len;
   expect(p, TOK_IDENT, "function name");
@@ -814,6 +831,8 @@ static const char *type_name(TypeKind t)
       return "bool";
     case TYPE_STR:
       return "str";
+    case TYPE_PTR:
+      return "ptr";
     case TYPE_VOID:
       return "void";
     default:

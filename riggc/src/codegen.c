@@ -62,7 +62,9 @@ static const char *ir_type(TypeKind t)
     case TYPE_BOOL:
       return "i1";
     case TYPE_STR:
-      return "i8*";
+      return "ptr";
+    case TYPE_PTR:
+      return "ptr";
     case TYPE_VOID:
       return "void";
     default:
@@ -434,7 +436,12 @@ static TypeKind infer_type(CG *cg, const Expr *e)
     case EXPR_IDENT:
     {
       const Local *l = find_local(cg, e->as.ident.ptr, e->as.ident.len);
-      return l ? l->type : TYPE_UNKNOWN;
+      if (l)
+        return l->type;
+      const ExternDecl *ex = find_extern_decl(cg, e->as.ident.ptr, e->as.ident.len);
+      if (ex && ex->kind == EXTERN_VAR)
+        return ex->return_type;
+      return TYPE_UNKNOWN;
     }
     case EXPR_CALL:
     {
@@ -448,7 +455,8 @@ static TypeKind infer_type(CG *cg, const Expr *e)
     }
     case EXPR_QUAL_CALL:
     {
-      int tgt = project_concept_index(cg->proj, e->as.qual_call.concept, e->as.qual_call.concept_len);
+      int tgt =
+          project_concept_index(cg->proj, e->as.qual_call.concept, e->as.qual_call.concept_len);
       if (tgt < 0)
         return TYPE_UNKNOWN;
       const FnDecl *f = find_fn_decl_qual(cg, tgt, e->as.qual_call.name, e->as.qual_call.name_len);
@@ -503,19 +511,30 @@ static int emit_expr(CG *cg, const Expr *e, TypeKind hint)
       int r = new_reg(cg);
       int arr_len = cg->str_literals[idx].logical_len + 1;
       /* getelementptr to get i8* from the global array */
-      emit(cg, "  %%%d = getelementptr inbounds [%d x i8], [%d x i8]* @.str.%d, i32 0, i32 0\n", r,
-           arr_len, arr_len, idx);
+      emit(cg, "  %%%d = getelementptr inbounds [%d x i8], ptr @.str.%d, i32 0, i32 0\n", r,
+           arr_len, idx);
       return r;
     }
 
     case EXPR_IDENT:
     {
       const Local *l = find_local(cg, e->as.ident.ptr, e->as.ident.len);
-      if (!l)
-        return 0; /* sema already caught this */
-      int r = new_reg(cg);
-      emit(cg, "  %%%d = load %s, %s* %%%d\n", r, ir_type(l->type), ir_type(l->type), l->reg);
-      return r;
+      if (l)
+      {
+        int r = new_reg(cg);
+        emit(cg, "  %%%d = load %s, ptr %%%d\n", r, ir_type(l->type), l->reg);
+
+        return r;
+      }
+      const ExternDecl *ex = find_extern_decl(cg, e->as.ident.ptr, e->as.ident.len);
+      if (ex && ex->kind == EXTERN_VAR)
+      {
+        int r = new_reg(cg);
+        emit(cg, "  %%%d = load %s, ptr @%.*s\n", r, ir_type(ex->return_type), ex->name_len,
+             ex->name);
+        return r;
+      }
+      return 0; /* sema already caught this */
     }
 
     case EXPR_ASSIGN:
@@ -524,7 +543,7 @@ static int emit_expr(CG *cg, const Expr *e, TypeKind hint)
       if (!l)
         return 0;
       int val = emit_expr(cg, e->as.assign.value, l->type);
-      emit(cg, "  store %s %%%d, %s* %%%d\n", ir_type(l->type), val, ir_type(l->type), l->reg);
+      emit(cg, "  store %s %%%d, ptr %%%d\n", ir_type(l->type), val, l->reg);
       return val;
     }
 
@@ -738,7 +757,7 @@ static void emit_stmt(CG *cg, const Stmt *s, const FnDecl *fn)
       if (init)
       {
         int val = emit_expr(cg, init, type);
-        emit(cg, "  store %s %%%d, %s* %%%d\n", ir_type(type), val, ir_type(type), alloca_reg);
+        emit(cg, "  store %s %%%d, ptr %%%d\n", ir_type(type), val, alloca_reg);
       }
       break;
     }
@@ -893,8 +912,7 @@ static void emit_fn(CG *cg, const FnDecl *fn, const char *concept_name)
   {
     int alloca_reg = new_reg(cg);
     emit(cg, "  %%%d = alloca %s\n", alloca_reg, ir_type(fn->params[i].type));
-    emit(cg, "  store %s %%p%d, %s* %%%d\n", ir_type(fn->params[i].type), i,
-         ir_type(fn->params[i].type), alloca_reg);
+    emit(cg, "  store %s %%p%d, ptr %%%d\n", ir_type(fn->params[i].type), i, alloca_reg);
     push_local(cg, fn->params[i].name, fn->params[i].name_len, fn->params[i].type, alloca_reg);
   }
 
@@ -1085,27 +1103,35 @@ static int emit_concept(const Project *proj, int concept_idx, const char *out_pa
   if (dcnt)
     fprintf(f, "\n");
 
-  /* Emit declare stubs for extern fn declarations */
+  /* Emit declare stubs for extern declarations */
   for (int i = 0; i < c->file_count; i++)
   {
     const Program *prog = &c->files[i].program;
     for (int j = 0; j < prog->extern_count; j++)
     {
       const ExternDecl *ex = &prog->externs[j];
-      fprintf(f, "declare %s @%.*s(", ir_type(ex->return_type), ex->name_len, ex->name);
-      for (int k = 0; k < ex->param_count; k++)
+      if (ex->kind == EXTERN_VAR)
       {
-        if (k)
-          fprintf(f, ", ");
-        fprintf(f, "%s", ir_type(ex->params[k].type));
+        fprintf(f, "@%.*s = external global %s\n", ex->name_len, ex->name,
+                ir_type(ex->return_type));
       }
-      if (ex->is_variadic)
+      else
       {
-        if (ex->param_count)
-          fprintf(f, ", ");
-        fprintf(f, "...");
+        fprintf(f, "declare %s @%.*s(", ir_type(ex->return_type), ex->name_len, ex->name);
+        for (int k = 0; k < ex->param_count; k++)
+        {
+          if (k)
+            fprintf(f, ", ");
+          fprintf(f, "%s", ir_type(ex->params[k].type));
+        }
+        if (ex->is_variadic)
+        {
+          if (ex->param_count)
+            fprintf(f, ", ");
+          fprintf(f, "...");
+        }
+        fprintf(f, ")\n");
       }
-      fprintf(f, ")\n");
     }
   }
   if (c->file_count)

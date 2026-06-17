@@ -8,6 +8,7 @@ u8   u16   u32   u64
 f32  f64
 bool
 str
+ptr
 ```
 
 No implicit numeric conversions. Types must match exactly at call sites and assignments.

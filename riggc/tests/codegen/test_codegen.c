@@ -188,8 +188,14 @@ static void test_float_ops(void)
 static void test_variadic_str(void)
 {
   ASSERT(emit("variadic_str") == 0, "emit succeeded");
-  /* The second argument ("world") should be i8*, not i32 */
-  assert_ir_contains("variadic_str", "main", "call i32 @printf(i8* %1, i8* %2)");
+  /* The second argument ("world") should be ptr, not i32 */
+  assert_ir_contains("variadic_str", "main", "call i32 @printf(ptr %1, ptr %2)");
+}
+
+static void test_ptr_type(void)
+{
+  ASSERT(emit("ptr_type") == 0, "emit succeeded");
+  assert_ir_contains("ptr_type", "main", "define ptr @main__test_ptr(ptr %p0)");
 }
 
 /* ── main ────────────────────────────────────────────────────────────────── */
@@ -206,6 +212,7 @@ int main(void)
   run_test("qual_call",     test_qual_call);
   run_test("float_ops",     test_float_ops);
   run_test("variadic_str",  test_variadic_str);
+  run_test("ptr_type",      test_ptr_type);
 
   print_summary();
   return tc_suite_failed() > 0 ? 1 : 0;

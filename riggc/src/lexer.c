@@ -79,6 +79,7 @@ static TokenKind keyword_or_ident(const char *start, int len)
   KW("break", TOK_BREAK)
   KW("continue", TOK_CONTINUE)
   KW("extern", TOK_EXTERN)
+  KW("var", TOK_VAR)
   KW("true", TOK_TRUE)
   KW("false", TOK_FALSE)
   KW("i8", TOK_I8)
@@ -93,6 +94,7 @@ static TokenKind keyword_or_ident(const char *start, int len)
   KW("f64", TOK_F64)
   KW("bool", TOK_BOOL)
   KW("str", TOK_STR)
+  KW("ptr", TOK_PTR)
 #undef KW
   return TOK_IDENT;
 }

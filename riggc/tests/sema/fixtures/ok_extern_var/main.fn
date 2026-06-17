@@ -1,0 +1,6 @@
+extern var stderr: ptr;
+extern fn fprintf(fp: ptr, fmt: str, ...);
+
+fn main() {
+    fprintf(stderr, "hello world\n");
+}

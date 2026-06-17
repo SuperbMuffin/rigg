@@ -1,0 +1,6 @@
+fn test_ptr(p: ptr) -> ptr {
+    return p;
+}
+
+fn main() {
+}
