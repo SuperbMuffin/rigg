@@ -828,10 +828,10 @@ static TypeKind infer_expr(const Expr *e, const FnDecl *fn, Scope *scope, const 
           symtable_lookup_local_var(symt, concept_idx, e->as.ident.ptr, e->as.ident.len);
       if (gv)
         return gv->type;
-      push_error(res, "I005", rel_path, e->line,
-                 xsprintf("'%.*s' is not defined in this concept.", e->as.ident.len,
-                          e->as.ident.ptr),
-                 xsprintf("Unknown identifier '%.*s'", e->as.ident.len, e->as.ident.ptr));
+      push_error(
+          res, "I005", rel_path, e->line,
+          xsprintf("'%.*s' is not defined in this concept.", e->as.ident.len, e->as.ident.ptr),
+          xsprintf("Unknown identifier '%.*s'", e->as.ident.len, e->as.ident.ptr));
       return TYPE_UNKNOWN;
     }
 
