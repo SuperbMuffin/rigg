@@ -1,4 +1,4 @@
-name: Run Clang Format Test
+name: Run Clang Format Test for Riggc
 
 on:
   push:
