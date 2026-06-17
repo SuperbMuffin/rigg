@@ -10,11 +10,14 @@ int main(int argc, char **argv)
 {
   const char *root = ".";
   int emit_ir = 0;
+  const char *opt_level = "-O0";
 
   for (int i = 1; i < argc; i++)
   {
     if (strcmp(argv[i], "--emit-ir") == 0)
       emit_ir = 1;
+    else if (strncmp(argv[i], "-O", 2) == 0)
+      opt_level = argv[i];
     else
       root = argv[i];
   }
@@ -49,7 +52,7 @@ int main(int argc, char **argv)
     pclose(tp);
   }
 
-  CodegenOptions opts = {.emit_ir_only = emit_ir, .target_triple = target_triple};
+  CodegenOptions opts = {.emit_ir_only = emit_ir, .target_triple = target_triple, .opt_level = opt_level};
   int rc = codegen_run(&proj, &opts);
 
   project_free(&proj);

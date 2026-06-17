@@ -1085,18 +1085,20 @@ static int run_cmd(const char *cmd)
   return rc;
 }
 
-static int build(const Project *proj, const char *ir_dir, const char *out_path)
+static int build(const Project *proj, const char *ir_dir, const char *out_path,
+                 const CodegenOptions *opts)
 {
   /* clang accepts .ll files directly — no llc step needed */
-  size_t cmd_len = strlen("clang -Wno-override-module -o ") + strlen(out_path) + 1;
+  int len = snprintf(NULL, 0, "clang %s -Wno-override-module -o %s", opts->opt_level, out_path);
   for (int i = 0; i < proj->concept_count; i++)
-    cmd_len += strlen(ir_dir) + 1 + strlen(proj->concepts[i].name) + 4;
+    len += snprintf(NULL, 0, " %s/%s.ll", ir_dir, proj->concepts[i].name);
 
-  char *cmd = xmalloc(cmd_len + 1);
-  int pos = 0;
-  pos += snprintf(cmd + pos, cmd_len - (size_t) pos, "clang -Wno-override-module -o %s", out_path);
+  char *cmd = xmalloc((size_t) len + 1);
+  int pos = snprintf(cmd, (size_t) len + 1, "clang %s -Wno-override-module -o %s", opts->opt_level,
+                     out_path);
   for (int i = 0; i < proj->concept_count; i++)
-    pos += snprintf(cmd + pos, cmd_len - (size_t) pos, " %s/%s.ll", ir_dir, proj->concepts[i].name);
+    pos += snprintf(cmd + pos, (size_t) len + 1 - (size_t) pos, " %s/%s.ll", ir_dir,
+                    proj->concepts[i].name);
 
   int rc = run_cmd(cmd);
   free(cmd);
@@ -1124,7 +1126,7 @@ int codegen_run(const Project *proj, const CodegenOptions *opts)
     return 0;
 
   char *out_path = xsprintf("%s/build/out", proj->root);
-  int rc = build(proj, ir_dir, out_path);
+  int rc = build(proj, ir_dir, out_path, opts);
   free(out_path);
   return rc;
 }
