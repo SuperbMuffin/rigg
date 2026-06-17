@@ -29,4 +29,7 @@ test:
 run: all
 	./$(TARGET)
 
+install: all
+	cp $(TARGET) /usr/local/bin/riggc
+
 .PHONY: all clean run

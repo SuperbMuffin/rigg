@@ -10,14 +10,14 @@ int main(int argc, char **argv)
 {
   const char *root = ".";
   int emit_ir = 0;
-  const char *opt_level = "-O0";
+  int check_only = 0;
 
   for (int i = 1; i < argc; i++)
   {
     if (strcmp(argv[i], "--emit-ir") == 0)
       emit_ir = 1;
-    else if (strncmp(argv[i], "-O", 2) == 0)
-      opt_level = argv[i];
+    else if (strcmp(argv[i], "--check") == 0)
+      check_only = 1;
     else
       root = argv[i];
   }
@@ -39,6 +39,12 @@ int main(int argc, char **argv)
 
   sema_free(&result);
 
+  if (check_only)
+  {
+    project_free(&proj);
+    return 0;
+  }
+
   char target_triple[256] = {0};
   FILE *tp = popen("clang -print-target-triple", "r");
   if (tp)
@@ -52,9 +58,10 @@ int main(int argc, char **argv)
     pclose(tp);
   }
 
-  CodegenOptions opts = {.emit_ir_only = emit_ir, .target_triple = target_triple, .opt_level = opt_level};
+  CodegenOptions opts = {
+      .emit_ir_only = emit_ir, .target_triple = target_triple, .opt_level = ""};
   int rc = codegen_run(&proj, &opts);
 
   project_free(&proj);
-  return rc < 0 ? 1 : 0;
+  return rc != 0 ? 1 : 0;
 }

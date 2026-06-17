@@ -10,6 +10,7 @@ The filesystem defines your public API. The project graph defines your dependenc
 
 - [SPEC.md](SPEC.md) — language architecture and project structure
 - [SYNTAX.md](SYNTAX.md) — language syntax reference
+- [ERRORS.md](ERRORS.md) — compiler error reference
 
 ---
 

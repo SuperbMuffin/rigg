@@ -1,7 +1,7 @@
 CC      = clang
 CFLAGS  = -Wall -Wextra -Werror -pedantic -std=c99 -g -Iinclude -MMD -MP
 
-SRC     = src/main.c
+SRC     = src/main.c src/cmd.c src/toml.c
 OBJ     = $(SRC:src/%.c=build/%.o)
 DEP     = $(OBJ:.o=.d)
 TARGET  = build/rigg
@@ -28,5 +28,8 @@ test:
 
 run: all
 	./$(TARGET)
+
+install: all
+	cp $(TARGET) /usr/local/bin/rigg
 
 .PHONY: all clean run
