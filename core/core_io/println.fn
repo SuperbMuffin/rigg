@@ -1,5 +1,4 @@
 fn println(s: str)
 {
-    printf(s);
-    printf("\n");
+    printf("%s\n", s);
 }

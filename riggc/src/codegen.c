@@ -304,6 +304,7 @@ static char *mangle(const char *concept, const char *fn, int fn_len)
 /* forward declarations */
 
 static int emit_expr(CG *cg, const Expr *e, TypeKind hint);
+static TypeKind infer_type(CG *cg, const Expr *e);
 static void emit_block(CG *cg, const Block *block, const FnDecl *fn);
 static void emit_stmt(CG *cg, const Stmt *s, const FnDecl *fn);
 
@@ -327,7 +328,16 @@ static int emit_call(CG *cg, const char *mangled_name, TypeKind ret, const ArgLi
     arg_regs[i] = emit_expr(cg, args->args[i], hint);
     /* For variadic args beyond fixed params, default to i32 for ints,
        double for floats — mirrors C's default argument promotions */
-    arg_types[i] = (i < fixed) ? params[i].type : TYPE_I32;
+    if (i < fixed)
+      arg_types[i] = params[i].type;
+    else
+    {
+      arg_types[i] = infer_type(cg, args->args[i]);
+      if (arg_types[i] == TYPE_UNKNOWN || arg_types[i] == TYPE_I32)
+        arg_types[i] = TYPE_I32;
+      else if (arg_types[i] == TYPE_F32)
+        arg_types[i] = TYPE_F64;
+    }
   }
 
   if (ret == TYPE_VOID)
@@ -405,6 +415,53 @@ static const FnDecl *find_fn_decl_qual(const CG *cg, int tgt_concept_idx, const 
     }
   }
   return NULL;
+}
+
+static TypeKind infer_type(CG *cg, const Expr *e)
+{
+  if (!e)
+    return TYPE_UNKNOWN;
+  switch (e->kind)
+  {
+    case EXPR_INT_LIT:
+      return TYPE_I32;
+    case EXPR_FLOAT_LIT:
+      return TYPE_F64;
+    case EXPR_STR_LIT:
+      return TYPE_STR;
+    case EXPR_BOOL_LIT:
+      return TYPE_BOOL;
+    case EXPR_IDENT:
+    {
+      const Local *l = find_local(cg, e->as.ident.ptr, e->as.ident.len);
+      return l ? l->type : TYPE_UNKNOWN;
+    }
+    case EXPR_CALL:
+    {
+      const FnDecl *f = find_fn_decl(cg, e->as.call.name, e->as.call.name_len);
+      if (f)
+        return f->return_type;
+      const ExternDecl *ex = find_extern_decl(cg, e->as.call.name, e->as.call.name_len);
+      if (ex)
+        return ex->return_type;
+      return TYPE_UNKNOWN;
+    }
+    case EXPR_QUAL_CALL:
+    {
+      int tgt = project_concept_index(cg->proj, e->as.qual_call.concept, e->as.qual_call.concept_len);
+      if (tgt < 0)
+        return TYPE_UNKNOWN;
+      const FnDecl *f = find_fn_decl_qual(cg, tgt, e->as.qual_call.name, e->as.qual_call.name_len);
+      return f ? f->return_type : TYPE_UNKNOWN;
+    }
+    case EXPR_ASSIGN:
+      return infer_type(cg, e->as.assign.value);
+    case EXPR_UNARY:
+      return infer_type(cg, e->as.unary.operand);
+    case EXPR_BINARY:
+      return infer_type(cg, e->as.binary.left);
+  }
+  return TYPE_UNKNOWN;
 }
 
 /* Emit an expression; returns the register holding the result.

@@ -1,4 +1,0 @@
-fn print_int(n: i32)
-{
-    printf("%d", n);
-}

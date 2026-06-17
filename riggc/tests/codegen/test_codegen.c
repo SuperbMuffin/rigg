@@ -185,6 +185,13 @@ static void test_float_ops(void)
   assert_ir_contains("float_ops", "main", "fadd double");
 }
 
+static void test_variadic_str(void)
+{
+  ASSERT(emit("variadic_str") == 0, "emit succeeded");
+  /* The second argument ("world") should be i8*, not i32 */
+  assert_ir_contains("variadic_str", "main", "call i32 @printf(i8* %1, i8* %2)");
+}
+
 /* ── main ────────────────────────────────────────────────────────────────── */
 
 int main(void)
@@ -198,6 +205,7 @@ int main(void)
   run_test("loop_break",    test_loop_break);
   run_test("qual_call",     test_qual_call);
   run_test("float_ops",     test_float_ops);
+  run_test("variadic_str",  test_variadic_str);
 
   print_summary();
   return tc_suite_failed() > 0 ? 1 : 0;

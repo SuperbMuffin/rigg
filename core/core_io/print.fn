@@ -1,4 +1,4 @@
 fn print(s: str)
 {
-  printf(s);
+  printf("%s", s);
 }

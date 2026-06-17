@@ -1,4 +1,0 @@
-fn print(s: str)
-{
-  printf(s);
-}
