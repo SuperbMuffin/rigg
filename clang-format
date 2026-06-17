@@ -1,0 +1,21 @@
+# This file gets symlinked to all other C parts of rigg
+
+BasedOnStyle: LLVM
+IndentWidth: 2
+TabWidth: 2
+UseTab: Never
+ColumnLimit: 100
+BreakBeforeBraces: Allman
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: Empty
+PointerAlignment: Right
+SpaceBeforeParens: ControlStatements
+SpaceAfterCStyleCast: true
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+IncludeBlocks: Preserve
+IndentCaseLabels: true
+SortIncludes: true
+DerivePointerAlignment: false
+AlignEscapedNewlines: Left

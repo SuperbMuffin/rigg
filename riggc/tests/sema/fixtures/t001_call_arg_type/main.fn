@@ -1,0 +1,4 @@
+fn main()
+{
+    math::add(true, 2);
+}

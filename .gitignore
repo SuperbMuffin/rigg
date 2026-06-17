@@ -1,0 +1,25 @@
+# ==========================================
+# Rigg Language Build Artifacts
+# ==========================================
+
+# Catch any directory named 'build' or 'target' anywhere in the project
+**/build/
+**/target/
+**/dist/
+
+# Catch the compiled compiler binary itself
+/riggc/riggc
+riggc.exe
+
+# Catch compiled example executables (assuming they output to their own dirs or root)
+/examples/**/run
+/examples/**/*.out
+*.exe
+*.out
+*.o
+*.obj
+
+
+# OS specific junk
+.DS_Store
+Thumbs.db

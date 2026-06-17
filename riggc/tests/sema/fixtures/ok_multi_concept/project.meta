@@ -1,0 +1,7 @@
+main:
+    -> buffer
+
+core
+
+buffer:
+    -> core
