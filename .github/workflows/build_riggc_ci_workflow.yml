@@ -14,9 +14,8 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: cd into project directory
-      run: cd riggc
-
     - name: Compile project with Clang
-      run: make CC=clang
+      run: |
+        cd riggc
+        make CC=clang
 

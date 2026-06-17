@@ -19,6 +19,6 @@ jobs:
 
     - name: Run test script
       run: |
-        cd tests
+        cd riggc/tests
         ./run_tests.sh
 
