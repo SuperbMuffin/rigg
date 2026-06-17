@@ -58,8 +58,7 @@ int main(int argc, char **argv)
     pclose(tp);
   }
 
-  CodegenOptions opts = {
-      .emit_ir_only = emit_ir, .target_triple = target_triple, .opt_level = ""};
+  CodegenOptions opts = {.emit_ir_only = emit_ir, .target_triple = target_triple, .opt_level = ""};
   int rc = codegen_run(&proj, &opts);
 
   project_free(&proj);
