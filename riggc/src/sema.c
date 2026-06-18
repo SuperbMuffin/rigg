@@ -254,6 +254,7 @@ typedef struct
 {
   const char *name;
   int len;
+  const FnDecl *decl;
 } Export;
 
 static Export *concept_exports(const Concept *c, int *out_count)
@@ -270,17 +271,14 @@ static Export *concept_exports(const Concept *c, int *out_count)
 
     const char *stem = sf->stem;
     int slen = (int) strlen(stem);
-    int found = 0;
+    const FnDecl *primary = NULL;
     for (int j = 0; j < sf->program.fn_count; j++)
     {
       const FnDecl *fn = &sf->program.fns[j];
       if (fn->name_len == slen && memcmp(fn->name, stem, (size_t) slen) == 0)
-      {
-        found = 1;
-        break;
-      }
+        primary = fn; /* last match wins, per SYNTAX.md */
     }
-    if (!found)
+    if (!primary)
       continue;
 
     if (*out_count == cap)
@@ -288,7 +286,7 @@ static Export *concept_exports(const Concept *c, int *out_count)
       cap = cap ? cap * 2 : 4;
       ex = util_xrealloc(ex, (size_t) cap * sizeof(Export));
     }
-    ex[(*out_count)++] = (Export){stem, slen};
+    ex[(*out_count)++] = (Export){stem, slen, primary};
   }
   return ex;
 }
@@ -647,6 +645,7 @@ typedef struct
   int param_count;
   TypeKind return_type;
   int is_variadic;
+  int is_primary; /* 1 if this is the primary export of its .fn file */
 } FnSymbol;
 
 typedef struct
@@ -698,6 +697,20 @@ static void symtable_build(const Project *proj, SymTable *t)
     for (int j = 0; j < c->file_count; j++)
     {
       const SourceFile *sf = &c->files[j];
+
+      /* For FILE_FN, find the primary export (last fn matching the stem). */
+      const FnDecl *primary_fn = NULL;
+      if (sf->kind == FILE_FN)
+      {
+        int slen = (int) strlen(sf->stem);
+        for (int k = 0; k < sf->program.fn_count; k++)
+        {
+          const FnDecl *fn = &sf->program.fns[k];
+          if (fn->name_len == slen && memcmp(fn->name, sf->stem, (size_t) slen) == 0)
+            primary_fn = fn;
+        }
+      }
+
       for (int k = 0; k < sf->program.fn_count; k++)
       {
         const FnDecl *fn = &sf->program.fns[k];
@@ -709,6 +722,7 @@ static void symtable_build(const Project *proj, SymTable *t)
         s.param_count = fn->param_count;
         s.return_type = fn->return_type;
         s.is_variadic = 0;
+        s.is_primary = (fn == primary_fn) ? 1 : 0;
         symtable_push_fn(t, s);
       }
       /* Externs are callable/accessible within the concept like any local fn/var */
@@ -734,6 +748,7 @@ static void symtable_build(const Project *proj, SymTable *t)
           s.param_count = ex->param_count;
           s.return_type = ex->return_type;
           s.is_variadic = ex->is_variadic;
+          s.is_primary = 0;
           symtable_push_fn(t, s);
         }
       }
@@ -767,14 +782,14 @@ static const GlobalVarSymbol *symtable_lookup_local_var(const SymTable *t, int c
 }
 
 /* Look up a qualified call: concept::fn. Only matches the primary exported
-   function (last fn in a .fn file matching the stem) — import checking has
-   already verified the call is legal, so we just need the type. */
+   function of a .fn file — helpers in the same file are not externally callable. */
 static const FnSymbol *symtable_lookup_qual_fn(const SymTable *t, int concept_idx, const char *name,
                                                int name_len)
 {
   for (int i = 0; i < t->fn_count; i++)
   {
-    if (t->fn_syms[i].concept_idx == concept_idx && t->fn_syms[i].name_len == name_len &&
+    if (t->fn_syms[i].concept_idx == concept_idx && t->fn_syms[i].is_primary &&
+        t->fn_syms[i].name_len == name_len &&
         memcmp(t->fn_syms[i].name, name, (size_t) name_len) == 0)
       return &t->fn_syms[i];
   }
