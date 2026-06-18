@@ -5,24 +5,28 @@
  * helpers
  * ---------------------------------------------------------------------- */
 
-static Token next_tok(Lexer *l) { return lexer_next(l); }
+static Token next_tok(Lexer *l)
+{
+  return lexer_next(l);
+}
 
-static void assert_tok(Lexer *l, TokenKind kind, const char *text) {
+static void assert_tok(Lexer *l, TokenKind kind, const char *text)
+{
   Token t = lexer_next(l);
   char msg[128];
 
   snprintf(msg, sizeof(msg), "expected kind %d got %d", kind, t.kind);
   ASSERT(t.kind == kind, msg);
 
-  if (text) {
-    snprintf(msg, sizeof(msg), "expected text '%s' got '%.*s'", text, t.len,
-             t.start);
-    ASSERT(t.len == (int)strlen(text) && memcmp(t.start, text, t.len) == 0,
-           msg);
+  if (text)
+  {
+    snprintf(msg, sizeof(msg), "expected text '%s' got '%.*s'", text, t.len, t.start);
+    ASSERT(t.len == (int) strlen(text) && memcmp(t.start, text, t.len) == 0, msg);
   }
 }
 
-static void assert_eof(Lexer *l) {
+static void assert_eof(Lexer *l)
+{
   Token t = lexer_next(l);
   ASSERT(t.kind == TOK_EOF, "expected EOF");
 }
@@ -31,9 +35,9 @@ static void assert_eof(Lexer *l) {
  * keywords
  * ---------------------------------------------------------------------- */
 
-static void test_keywords(void) {
-  const char *src =
-      "fn let mut const return if else while loop break continue true false";
+static void test_keywords(void)
+{
+  const char *src = "fn let mut const return if else while loop break continue true false";
   Lexer l;
   lexer_init(&l, src);
   assert_tok(&l, TOK_FN, "fn");
@@ -52,7 +56,8 @@ static void test_keywords(void) {
   assert_eof(&l);
 }
 
-static void test_types(void) {
+static void test_types(void)
+{
   const char *src = "i8 i16 i32 i64 u8 u16 u32 u64 f32 f64 bool str";
   Lexer l;
   lexer_init(&l, src);
@@ -75,7 +80,8 @@ static void test_types(void) {
  * identifiers
  * ---------------------------------------------------------------------- */
 
-static void test_ident_simple(void) {
+static void test_ident_simple(void)
+{
   const char *src = "foo bar baz";
   Lexer l;
   lexer_init(&l, src);
@@ -85,7 +91,8 @@ static void test_ident_simple(void) {
   assert_eof(&l);
 }
 
-static void test_ident_snake_case(void) {
+static void test_ident_snake_case(void)
+{
   const char *src = "my_var another_one _private";
   Lexer l;
   lexer_init(&l, src);
@@ -95,7 +102,8 @@ static void test_ident_snake_case(void) {
   assert_eof(&l);
 }
 
-static void test_ident_not_keyword_prefix(void) {
+static void test_ident_not_keyword_prefix(void)
+{
   /* "fns" and "lets" look like keywords but are not */
   const char *src = "fns lets mutable";
   Lexer l;
@@ -110,7 +118,8 @@ static void test_ident_not_keyword_prefix(void) {
  * literals
  * ---------------------------------------------------------------------- */
 
-static void test_int_literal(void) {
+static void test_int_literal(void)
+{
   const char *src = "0 42 1000";
   Lexer l;
   lexer_init(&l, src);
@@ -120,7 +129,8 @@ static void test_int_literal(void) {
   assert_eof(&l);
 }
 
-static void test_float_literal(void) {
+static void test_float_literal(void)
+{
   const char *src = "3.14 0.5 100.0";
   Lexer l;
   lexer_init(&l, src);
@@ -130,7 +140,8 @@ static void test_float_literal(void) {
   assert_eof(&l);
 }
 
-static void test_string_literal(void) {
+static void test_string_literal(void)
+{
   const char *src = "\"hello\" \"world\"";
   Lexer l;
   lexer_init(&l, src);
@@ -139,7 +150,8 @@ static void test_string_literal(void) {
   assert_eof(&l);
 }
 
-static void test_string_empty(void) {
+static void test_string_empty(void)
+{
   const char *src = "\"\"";
   Lexer l;
   lexer_init(&l, src);
@@ -153,7 +165,8 @@ static void test_string_empty(void) {
  * punctuation and operators
  * ---------------------------------------------------------------------- */
 
-static void test_punctuation(void) {
+static void test_punctuation(void)
+{
   const char *src = "( ) { } , ;";
   Lexer l;
   lexer_init(&l, src);
@@ -166,7 +179,8 @@ static void test_punctuation(void) {
   assert_eof(&l);
 }
 
-static void test_arithmetic_ops(void) {
+static void test_arithmetic_ops(void)
+{
   const char *src = "+ - * / %";
   Lexer l;
   lexer_init(&l, src);
@@ -178,7 +192,8 @@ static void test_arithmetic_ops(void) {
   assert_eof(&l);
 }
 
-static void test_comparison_ops(void) {
+static void test_comparison_ops(void)
+{
   const char *src = "== != < > <= >=";
   Lexer l;
   lexer_init(&l, src);
@@ -191,7 +206,8 @@ static void test_comparison_ops(void) {
   assert_eof(&l);
 }
 
-static void test_logical_ops(void) {
+static void test_logical_ops(void)
+{
   const char *src = "&& || !";
   Lexer l;
   lexer_init(&l, src);
@@ -201,7 +217,8 @@ static void test_logical_ops(void) {
   assert_eof(&l);
 }
 
-static void test_assign_vs_eq(void) {
+static void test_assign_vs_eq(void)
+{
   const char *src = "= ==";
   Lexer l;
   lexer_init(&l, src);
@@ -210,7 +227,8 @@ static void test_assign_vs_eq(void) {
   assert_eof(&l);
 }
 
-static void test_arrow(void) {
+static void test_arrow(void)
+{
   const char *src = "->";
   Lexer l;
   lexer_init(&l, src);
@@ -218,7 +236,8 @@ static void test_arrow(void) {
   assert_eof(&l);
 }
 
-static void test_minus_vs_arrow(void) {
+static void test_minus_vs_arrow(void)
+{
   const char *src = "- ->";
   Lexer l;
   lexer_init(&l, src);
@@ -227,7 +246,8 @@ static void test_minus_vs_arrow(void) {
   assert_eof(&l);
 }
 
-static void test_colon_vs_colon_colon(void) {
+static void test_colon_vs_colon_colon(void)
+{
   const char *src = ": ::";
   Lexer l;
   lexer_init(&l, src);
@@ -240,7 +260,8 @@ static void test_colon_vs_colon_colon(void) {
  * whitespace and comments
  * ---------------------------------------------------------------------- */
 
-static void test_whitespace_ignored(void) {
+static void test_whitespace_ignored(void)
+{
   const char *src = "   fn   \t  let  \n  mut  ";
   Lexer l;
   lexer_init(&l, src);
@@ -250,7 +271,8 @@ static void test_whitespace_ignored(void) {
   assert_eof(&l);
 }
 
-static void test_line_comment(void) {
+static void test_line_comment(void)
+{
   const char *src = "fn // this is ignored\nlet";
   Lexer l;
   lexer_init(&l, src);
@@ -259,7 +281,8 @@ static void test_line_comment(void) {
   assert_eof(&l);
 }
 
-static void test_block_comment(void) {
+static void test_block_comment(void)
+{
   const char *src = "fn /* this is\nignored */ let";
   Lexer l;
   lexer_init(&l, src);
@@ -268,7 +291,8 @@ static void test_block_comment(void) {
   assert_eof(&l);
 }
 
-static void test_comment_only(void) {
+static void test_comment_only(void)
+{
   const char *src = "// nothing here";
   Lexer l;
   lexer_init(&l, src);
@@ -279,7 +303,8 @@ static void test_comment_only(void) {
  * line numbers
  * ---------------------------------------------------------------------- */
 
-static void test_line_numbers(void) {
+static void test_line_numbers(void)
+{
   const char *src = "fn\nlet\n\nmut";
   Lexer l;
   lexer_init(&l, src);
@@ -294,7 +319,8 @@ static void test_line_numbers(void) {
   assert_eof(&l);
 }
 
-static void test_line_numbers_block_comment(void) {
+static void test_line_numbers_block_comment(void)
+{
   const char *src = "fn /* line1\nline2\nline3 */ let";
   Lexer l;
   lexer_init(&l, src);
@@ -311,7 +337,8 @@ static void test_line_numbers_block_comment(void) {
  * real rigg snippets
  * ---------------------------------------------------------------------- */
 
-static void test_fn_declaration(void) {
+static void test_fn_declaration(void)
+{
   const char *src = "fn add(a: i32, b: i32) -> i32";
   Lexer l;
   lexer_init(&l, src);
@@ -331,7 +358,8 @@ static void test_fn_declaration(void) {
   assert_eof(&l);
 }
 
-static void test_let_declaration(void) {
+static void test_let_declaration(void)
+{
   const char *src = "let mut count: i32 = 0;";
   Lexer l;
   lexer_init(&l, src);
@@ -346,7 +374,8 @@ static void test_let_declaration(void) {
   assert_eof(&l);
 }
 
-static void test_cross_concept_call(void) {
+static void test_cross_concept_call(void)
+{
   const char *src = "buffer::write(pos, ch);";
   Lexer l;
   lexer_init(&l, src);
@@ -362,7 +391,8 @@ static void test_cross_concept_call(void) {
   assert_eof(&l);
 }
 
-static void test_if_else(void) {
+static void test_if_else(void)
+{
   const char *src = "if x < 10 { return x; } else { return 10; }";
   Lexer l;
   lexer_init(&l, src);
@@ -384,7 +414,8 @@ static void test_if_else(void) {
   assert_eof(&l);
 }
 
-static void test_empty_input(void) {
+static void test_empty_input(void)
+{
   const char *src = "";
   Lexer l;
   lexer_init(&l, src);
@@ -397,7 +428,8 @@ static void test_empty_input(void) {
  * entry point
  * ---------------------------------------------------------------------- */
 
-int main(void) {
+int main(void)
+{
   run_test("keywords", test_keywords);
   run_test("types", test_types);
   run_test("ident_simple", test_ident_simple);

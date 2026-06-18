@@ -1,0 +1,37 @@
+fn unsigned_ops(a: u32, b: u32) -> u32
+{
+    let q: u32 = a / b;
+    let r: u32 = a % b;
+    if a >= b {
+        return q;
+    }
+    if a < b {
+        return r;
+    }
+    return a;
+}
+
+fn float_ops32(a: f32, b: f32) -> f32
+{
+    let q: f32 = a / b;
+    if a <= b {
+        return -q;
+    }
+    return q;
+}
+
+fn cast_ptr_roundtrip(x: i32, s: str) -> i32
+{
+    let p: ptr = x as ptr;
+    let y: i32 = p as i32;
+    let ok: bool = s as bool;
+    if ok {
+        return y;
+    }
+    return x;
+}
+
+fn main() -> i32
+{
+    return cast_ptr_roundtrip(7, "true");
+}

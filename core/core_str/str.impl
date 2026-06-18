@@ -1,0 +1,7 @@
+extern fn malloc(size: i64) -> ptr;
+
+extern fn strcpy(dest: ptr, src: str) -> ptr;
+extern fn strcat(dest: ptr, src: str) -> ptr;
+extern fn strlen(s: str) -> i64;
+
+extern fn strcmp(a: str, b: str) -> i32;

@@ -1,0 +1,4 @@
+fn len(s: str) -> i64
+{
+    return strlen(s);
+}

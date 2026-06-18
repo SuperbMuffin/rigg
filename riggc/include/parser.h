@@ -35,7 +35,9 @@ typedef enum
   EXPR_QUAL_CALL,
   EXPR_UNARY,
   EXPR_BINARY,
+  EXPR_INDEX,
   EXPR_ASSIGN,
+  EXPR_CAST,
 } ExprKind;
 
 typedef struct Expr Expr;
@@ -92,10 +94,19 @@ struct Expr
     } binary;
     struct
     {
-      const char *name;
-      int name_len;
+      Expr *target;
+      Expr *index;
+    } index;
+    struct
+    {
+      Expr *target;
       Expr *value;
     } assign;
+    struct
+    {
+      Expr *expr;
+      TypeKind target_type;
+    } cast;
   } as;
 };
 

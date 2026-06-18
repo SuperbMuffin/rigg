@@ -24,6 +24,7 @@ run_e2e() {
   local fixture="$FIXTURES_DIR/$name"
   local expect_exit="${2:-0}"
   local build_dir="$fixture/build"
+  local actual_exit=0
 
   rm -rf "$build_dir"
 
@@ -34,7 +35,8 @@ run_e2e() {
   fi
 
   local out="$build_dir/out"
-  if ! clang "$build_dir"/ir/*.ll -o "$out" 2>/dev/null; then
+  local runtime="$(dirname "$ROOT_DIR")/runtime/cast.c"
+  if ! clang "$build_dir"/ir/*.ll "$runtime" -o "$out" 2>/dev/null; then
     echo -e "FAIL  [$name] clang failed to link"
     failed=$((failed + 1))
     return
@@ -56,6 +58,7 @@ run_e2e() {
 run_e2e "ok_hello"          0
 run_e2e "ok_return_code"    42
 run_e2e "ok_multi_concept"  42
+run_e2e "ok_str_eq"          0
 
 echo ""
 echo -e "e2e: ${GREEN}${BOLD}$passed passed${RESET}, ${RED}${BOLD}$failed failed${RESET}"

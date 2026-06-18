@@ -82,6 +82,33 @@ static int type_is_unsigned(TypeKind t)
   return t == TYPE_U8 || t == TYPE_U16 || t == TYPE_U32 || t == TYPE_U64;
 }
 
+static int is_signed_int(TypeKind t)
+{
+  return t >= TYPE_I8 && t <= TYPE_I64;
+}
+
+static int is_repr_cast(TypeKind from, TypeKind to)
+{
+  return (from == TYPE_PTR && to == TYPE_STR) || (from == TYPE_STR && to == TYPE_PTR);
+}
+
+static int int_bit_width(TypeKind t)
+{
+  switch (t)
+  {
+    case TYPE_I8:
+      return 8;
+    case TYPE_I16:
+      return 16;
+    case TYPE_I32:
+      return 32;
+    case TYPE_I64:
+      return 64;
+    default:
+      return 0;
+  }
+}
+
 /* codegen context */
 
 /* Interned string literal: escaped IR buffer + original source length */
@@ -131,9 +158,12 @@ typedef struct
   StrLit *str_literals; /* IR constant strings, owned */
   int str_count;
   int str_cap;
+
+  int bounds_check; /* emit runtime checks on ptr[index] when set */
+  int terminated;   /* 1 if the current block has been terminated */
 } CG;
 
-static void cg_init(CG *cg, FILE *out, const Project *proj, int concept_idx)
+static void cg_init(CG *cg, FILE *out, const Project *proj, int concept_idx, int bounds_check)
 {
   memset(cg, 0, sizeof(*cg));
   cg->out = out;
@@ -141,6 +171,7 @@ static void cg_init(CG *cg, FILE *out, const Project *proj, int concept_idx)
   cg->concept_idx = concept_idx;
   cg->reg = 0;
   cg->label = 0;
+  cg->bounds_check = bounds_check;
 }
 
 static void cg_free(CG *cg)
@@ -155,6 +186,11 @@ static void cg_free(CG *cg)
 
 static void emit(CG *cg, const char *fmt, ...)
 {
+  if (cg->terminated && fmt[0] == ' ')
+    return;
+  if (fmt[0] == 'L')
+    cg->terminated = 0;
+
   va_list ap;
   va_start(ap, fmt);
   vfprintf(cg->out, fmt, ap);
@@ -306,6 +342,7 @@ static char *mangle(const char *concept, const char *fn, int fn_len)
 /* forward declarations */
 
 static int emit_expr(CG *cg, const Expr *e, TypeKind hint);
+static int emit_ptr_index_addr(CG *cg, int ptr_reg, const Expr *index_expr);
 static TypeKind infer_type(CG *cg, const Expr *e);
 static void emit_block(CG *cg, const Block *block, const FnDecl *fn);
 static void emit_stmt(CG *cg, const Stmt *s, const FnDecl *fn);
@@ -464,12 +501,125 @@ static TypeKind infer_type(CG *cg, const Expr *e)
     }
     case EXPR_ASSIGN:
       return infer_type(cg, e->as.assign.value);
+    case EXPR_INDEX:
+      return TYPE_I32;
     case EXPR_UNARY:
       return infer_type(cg, e->as.unary.operand);
     case EXPR_BINARY:
       return infer_type(cg, e->as.binary.left);
+    case EXPR_CAST:
+      return e->as.cast.target_type;
   }
   return TYPE_UNKNOWN;
+}
+
+static int emit_int_cast(CG *cg, int reg, TypeKind from, TypeKind to)
+{
+  if (from == to)
+    return reg;
+  int from_w = int_bit_width(from);
+  int to_w = int_bit_width(to);
+  int r = new_reg(cg);
+  if (to_w > from_w)
+    emit(cg, "  %%%d = sext %s %%%d to %s\n", r, ir_type(from), reg, ir_type(to));
+  else
+    emit(cg, "  %%%d = trunc %s %%%d to %s\n", r, ir_type(from), reg, ir_type(to));
+  return r;
+}
+
+static const char *str_to_int_rt(TypeKind t)
+{
+  switch (t)
+  {
+    case TYPE_I8:
+      return "rigg_str_to_i8";
+    case TYPE_I16:
+      return "rigg_str_to_i16";
+    case TYPE_I32:
+      return "rigg_str_to_i32";
+    case TYPE_I64:
+      return "rigg_str_to_i64";
+    default:
+      return NULL;
+  }
+}
+
+static const char *int_to_str_rt(TypeKind t)
+{
+  switch (t)
+  {
+    case TYPE_I8:
+      return "rigg_i8_to_str";
+    case TYPE_I16:
+      return "rigg_i16_to_str";
+    case TYPE_I32:
+      return "rigg_i32_to_str";
+    case TYPE_I64:
+      return "rigg_i64_to_str";
+    default:
+      return NULL;
+  }
+}
+
+static int emit_cast(CG *cg, const Expr *e)
+{
+  TypeKind dst = e->as.cast.target_type;
+  TypeKind src = infer_type(cg, e->as.cast.expr);
+  int operand = emit_expr(cg, e->as.cast.expr, src != TYPE_UNKNOWN ? src : dst);
+
+  if (is_repr_cast(src, dst))
+    return operand;
+
+  if (is_signed_int(src) && is_signed_int(dst))
+    return emit_int_cast(cg, operand, src, dst);
+
+  if (src == TYPE_STR && is_signed_int(dst))
+  {
+    const char *fn = str_to_int_rt(dst);
+    int r = new_reg(cg);
+    emit(cg, "  %%%d = call %s @%s(ptr %%%d)\n", r, ir_type(dst), fn, operand);
+    return r;
+  }
+
+  if (is_signed_int(src) && dst == TYPE_STR)
+  {
+    const char *fn = int_to_str_rt(src);
+    int r = new_reg(cg);
+    emit(cg, "  %%%d = call ptr @%s(%s %%%d)\n", r, fn, ir_type(src), operand);
+    return r;
+  }
+
+  if (src == TYPE_BOOL && dst == TYPE_STR)
+  {
+    int r = new_reg(cg);
+    emit(cg, "  %%%d = call ptr @rigg_bool_to_str(i1 %%%d)\n", r, operand);
+    return r;
+  }
+
+  if (src == TYPE_STR && dst == TYPE_BOOL)
+  {
+    int r = new_reg(cg);
+    emit(cg, "  %%%d = call i1 @rigg_str_to_bool(ptr %%%d)\n", r, operand);
+    return r;
+  }
+
+  /* integer -> ptr */
+  if (is_signed_int(src) && dst == TYPE_PTR)
+  {
+    int r = new_reg(cg);
+    emit(cg, "  %%%d = inttoptr %s %%%d to ptr\n", r, ir_type(src), operand);
+    return r;
+  }
+
+  /* ptr -> integer */
+  if (src == TYPE_PTR && is_signed_int(dst))
+  {
+    int r = new_reg(cg);
+    emit(cg, "  %%%d = ptrtoint ptr %%%d to %s\n", r, operand, ir_type(dst));
+    return r;
+  }
+
+  return operand;
 }
 
 /* Emit an expression; returns the register holding the result.
@@ -510,7 +660,6 @@ static int emit_expr(CG *cg, const Expr *e, TypeKind hint)
       int idx = intern_str(cg, e->as.sval.ptr, e->as.sval.len);
       int r = new_reg(cg);
       int arr_len = cg->str_literals[idx].logical_len + 1;
-      /* getelementptr to get i8* from the global array */
       emit(cg, "  %%%d = getelementptr inbounds [%d x i8], ptr @.str.%d, i32 0, i32 0\n", r,
            arr_len, idx);
       return r;
@@ -539,12 +688,38 @@ static int emit_expr(CG *cg, const Expr *e, TypeKind hint)
 
     case EXPR_ASSIGN:
     {
-      const Local *l = find_local(cg, e->as.assign.name, e->as.assign.name_len);
-      if (!l)
-        return 0;
-      int val = emit_expr(cg, e->as.assign.value, l->type);
-      emit(cg, "  store %s %%%d, ptr %%%d\n", ir_type(l->type), val, l->reg);
-      return val;
+      Expr *target = e->as.assign.target;
+      if (target->kind == EXPR_IDENT)
+      {
+        const Local *l = find_local(cg, target->as.ident.ptr, target->as.ident.len);
+        if (!l)
+          return 0;
+        int val = emit_expr(cg, e->as.assign.value, l->type);
+        emit(cg, "  store %s %%%d, ptr %%%d\n", ir_type(l->type), val, l->reg);
+        return val;
+      }
+      if (target->kind == EXPR_INDEX)
+      {
+        int ptr = emit_expr(cg, target->as.index.target, TYPE_PTR);
+        int addr = emit_ptr_index_addr(cg, ptr, target->as.index.index);
+        int val = emit_expr(cg, e->as.assign.value, TYPE_I32);
+        int byte = new_reg(cg);
+        emit(cg, "  %%%d = trunc i32 %%%d to i8\n", byte, val);
+        emit(cg, "  store i8 %%%d, ptr %%%d\n", byte, addr);
+        return val;
+      }
+      return 0;
+    }
+
+    case EXPR_INDEX:
+    {
+      int ptr = emit_expr(cg, e->as.index.target, TYPE_PTR);
+      int addr = emit_ptr_index_addr(cg, ptr, e->as.index.index);
+      int byte = new_reg(cg);
+      emit(cg, "  %%%d = load i8, ptr %%%d\n", byte, addr);
+      int r = new_reg(cg);
+      emit(cg, "  %%%d = zext i8 %%%d to i32\n", r, byte);
+      return r;
     }
 
     case EXPR_UNARY:
@@ -570,16 +745,40 @@ static int emit_expr(CG *cg, const Expr *e, TypeKind hint)
     case EXPR_BINARY:
     {
       /* TODO: short-circuit evaluation for && and || */
-      int lhs = emit_expr(cg, e->as.binary.left, hint);
-      int rhs = emit_expr(cg, e->as.binary.right, hint);
+      TokenKind op = e->as.binary.op;
+      int is_cmp = op == TOK_EQ || op == TOK_NEQ || op == TOK_LT || op == TOK_GT || op == TOK_LTE ||
+                   op == TOK_GTE;
+      int is_logic = op == TOK_AND || op == TOK_OR;
+
+      /* Comparisons yield i1 but compare operands at their own type; logical ops use i1. */
+      TypeKind t;
+      TypeKind emit_hint;
+      if (is_cmp)
+      {
+        t = infer_type(cg, e->as.binary.left);
+        if (t == TYPE_UNKNOWN)
+          t = TYPE_I32;
+        emit_hint = t;
+      }
+      else if (is_logic)
+      {
+        t = TYPE_BOOL;
+        emit_hint = TYPE_BOOL;
+      }
+      else
+      {
+        t = infer_type(cg, e->as.binary.left);
+        if (t == TYPE_UNKNOWN)
+          t = (hint != TYPE_UNKNOWN && hint != TYPE_VOID && hint != TYPE_BOOL) ? hint : TYPE_I32;
+        emit_hint = t;
+      }
+
+      int lhs = emit_expr(cg, e->as.binary.left, emit_hint);
+      int rhs = emit_expr(cg, e->as.binary.right, emit_hint);
       int r = new_reg(cg);
 
-      /* Determine operand type — use hint or fall back to i32 */
-      TypeKind t = (hint != TYPE_UNKNOWN && hint != TYPE_VOID) ? hint : TYPE_I32;
       int is_fp = type_is_float(t);
       int is_uns = type_is_unsigned(t);
-
-      TokenKind op = e->as.binary.op;
 
       if (is_fp)
       {
@@ -645,10 +844,16 @@ static int emit_expr(CG *cg, const Expr *e, TypeKind hint)
               emit(cg, "  %%%d = srem %s %%%d, %%%d\n", r, ir_type(t), lhs, rhs);
             break;
           case TOK_EQ:
-            emit(cg, "  %%%d = icmp eq  %s %%%d, %%%d\n", r, ir_type(t), lhs, rhs);
+            if (t == TYPE_STR)
+              emit(cg, "  %%%d = call i1 @rigg_str_eq(ptr %%%d, ptr %%%d)\n", r, lhs, rhs);
+            else
+              emit(cg, "  %%%d = icmp eq  %s %%%d, %%%d\n", r, ir_type(t), lhs, rhs);
             break;
           case TOK_NEQ:
-            emit(cg, "  %%%d = icmp ne  %s %%%d, %%%d\n", r, ir_type(t), lhs, rhs);
+            if (t == TYPE_STR)
+              emit(cg, "  %%%d = call i1 @rigg_str_ne(ptr %%%d, ptr %%%d)\n", r, lhs, rhs);
+            else
+              emit(cg, "  %%%d = icmp ne  %s %%%d, %%%d\n", r, ir_type(t), lhs, rhs);
             break;
           case TOK_LT:
             if (is_uns)
@@ -728,9 +933,47 @@ static int emit_expr(CG *cg, const Expr *e, TypeKind hint)
       free(mangled);
       return r;
     }
+
+    case EXPR_CAST:
+      return emit_cast(cg, e);
   }
 
   return 0;
+}
+
+static int emit_as_i32(CG *cg, const Expr *index_expr)
+{
+  TypeKind t = infer_type(cg, index_expr);
+  int reg = emit_expr(cg, index_expr, TYPE_I32);
+  if (t == TYPE_UNKNOWN || t == TYPE_I32)
+    return reg;
+  int r = new_reg(cg);
+  emit(cg, "  %%%d = trunc %s %%%d to i32\n", r, ir_type(t), reg);
+  return r;
+}
+
+static void emit_index_bounds_check(CG *cg, int index_reg)
+{
+  if (!cg->bounds_check)
+    return;
+  int ok = new_reg(cg);
+  emit(cg, "  %%%d = icmp sge i32 %%%d, 0\n", ok, index_reg);
+  int fail = new_label(cg);
+  int cont = new_label(cg);
+  emit(cg, "  br i1 %%%d, label %%L%d, label %%L%d\n", ok, cont, fail);
+  emit(cg, "L%d:\n", fail);
+  emit(cg, "  call void @abort()\n");
+  emit(cg, "  unreachable\n");
+  emit(cg, "L%d:\n", cont);
+}
+
+static int emit_ptr_index_addr(CG *cg, int ptr_reg, const Expr *index_expr)
+{
+  int index_reg = emit_as_i32(cg, index_expr);
+  emit_index_bounds_check(cg, index_reg);
+  int addr = new_reg(cg);
+  emit(cg, "  %%%d = getelementptr i8, ptr %%%d, i32 %%%d\n", addr, ptr_reg, index_reg);
+  return addr;
 }
 
 /* statement codegen */
@@ -752,13 +995,17 @@ static void emit_stmt(CG *cg, const Stmt *s, const FnDecl *fn)
 
       int alloca_reg = new_reg(cg);
       emit(cg, "  %%%d = alloca %s\n", alloca_reg, ir_type(type));
-      push_local(cg, name, nlen, type, alloca_reg);
 
       if (init)
       {
+        /* Evaluate the initializer BEFORE pushing the new local so that
+           shadowed names (e.g. `let x = f(x)`) still resolve to the
+           previous binding rather than the uninitialised new slot. */
         int val = emit_expr(cg, init, type);
         emit(cg, "  store %s %%%d, ptr %%%d\n", ir_type(type), val, alloca_reg);
       }
+
+      push_local(cg, name, nlen, type, alloca_reg);
       break;
     }
 
@@ -773,6 +1020,7 @@ static void emit_stmt(CG *cg, const Stmt *s, const FnDecl *fn)
         int val = emit_expr(cg, s->as.ret.value, fn->return_type);
         emit(cg, "  ret %s %%%d\n", ir_type(fn->return_type), val);
       }
+      cg->terminated = 1;
       break;
     }
 
@@ -885,6 +1133,7 @@ static void emit_fn(CG *cg, const FnDecl *fn, const char *concept_name)
   cg->reg = 0;
   cg->label = 0;
   cg->loop_depth = 0;
+  cg->terminated = 0;
   for (int i = 0; i < cg->local_count; i++)
     free(cg->locals[i].name);
   cg->local_count = 0;
@@ -1005,7 +1254,15 @@ static void collect_decls_expr(const Expr *e, const Project *proj, int concept_i
       collect_decls_expr(e->as.binary.right, proj, concept_idx, decls, count, cap);
       break;
     case EXPR_ASSIGN:
+      collect_decls_expr(e->as.assign.target, proj, concept_idx, decls, count, cap);
       collect_decls_expr(e->as.assign.value, proj, concept_idx, decls, count, cap);
+      break;
+    case EXPR_INDEX:
+      collect_decls_expr(e->as.index.target, proj, concept_idx, decls, count, cap);
+      collect_decls_expr(e->as.index.index, proj, concept_idx, decls, count, cap);
+      break;
+    case EXPR_CAST:
+      collect_decls_expr(e->as.cast.expr, proj, concept_idx, decls, count, cap);
       break;
     default:
       break;
@@ -1061,7 +1318,7 @@ static void collect_decls_block(const Block *b, const Project *proj, int concept
 /* concept → .ll file */
 
 static int emit_concept(const Project *proj, int concept_idx, const char *out_path,
-                        const char *target_triple)
+                        const char *target_triple, int bounds_check)
 {
   FILE *f = fopen(out_path, "w");
   if (!f)
@@ -1081,7 +1338,23 @@ static int emit_concept(const Project *proj, int concept_idx, const char *out_pa
 
   /* Collect all string literals across all files in the concept first */
   CG cg;
-  cg_init(&cg, f, proj, concept_idx);
+  cg_init(&cg, f, proj, concept_idx, bounds_check);
+
+  if (bounds_check)
+    fprintf(f, "declare void @abort()\n\n");
+
+  fprintf(f, "declare i8 @rigg_str_to_i8(ptr)\n");
+  fprintf(f, "declare i16 @rigg_str_to_i16(ptr)\n");
+  fprintf(f, "declare i32 @rigg_str_to_i32(ptr)\n");
+  fprintf(f, "declare i64 @rigg_str_to_i64(ptr)\n");
+  fprintf(f, "declare ptr @rigg_i8_to_str(i8)\n");
+  fprintf(f, "declare ptr @rigg_i16_to_str(i16)\n");
+  fprintf(f, "declare ptr @rigg_i32_to_str(i32)\n");
+  fprintf(f, "declare ptr @rigg_i64_to_str(i64)\n");
+  fprintf(f, "declare ptr @rigg_bool_to_str(i1)\n");
+  fprintf(f, "declare i1 @rigg_str_to_bool(ptr)\n");
+  fprintf(f, "declare i1 @rigg_str_eq(ptr, ptr)\n");
+  fprintf(f, "declare i1 @rigg_str_ne(ptr, ptr)\n\n");
 
   /* Collect external declares needed by this concept (cross-concept calls) */
   Decl *decls = NULL;
@@ -1171,14 +1444,18 @@ static int run_cmd(const char *cmd)
 static int build(const Project *proj, const char *ir_dir, const char *out_path,
                  const CodegenOptions *opts)
 {
+#ifndef RIGG_RUNTIME_PATH
+#define RIGG_RUNTIME_PATH "../runtime/cast.c"
+#endif
   /* clang accepts .ll files directly — no llc step needed */
-  int len = snprintf(NULL, 0, "clang %s -Wno-override-module -o %s", opts->opt_level, out_path);
+  int len = snprintf(NULL, 0, "clang %s -Wno-override-module -o %s %s", opts->opt_level, out_path,
+                     RIGG_RUNTIME_PATH);
   for (int i = 0; i < proj->concept_count; i++)
     len += snprintf(NULL, 0, " %s/%s.ll", ir_dir, proj->concepts[i].name);
 
   char *cmd = xmalloc((size_t) len + 1);
-  int pos = snprintf(cmd, (size_t) len + 1, "clang %s -Wno-override-module -o %s", opts->opt_level,
-                     out_path);
+  int pos = snprintf(cmd, (size_t) len + 1, "clang %s -Wno-override-module -o %s %s",
+                     opts->opt_level, out_path, RIGG_RUNTIME_PATH);
   for (int i = 0; i < proj->concept_count; i++)
     pos += snprintf(cmd + pos, (size_t) len + 1 - (size_t) pos, " %s/%s.ll", ir_dir,
                     proj->concepts[i].name);
@@ -1199,7 +1476,8 @@ int codegen_run(const Project *proj, const CodegenOptions *opts)
   for (int i = 0; i < proj->concept_count; i++)
   {
     char *out_path = xsprintf("%s/%s.ll", ir_dir, proj->concepts[i].name);
-    int rc = emit_concept(proj, i, out_path, opts->target_triple);
+    int bounds_check = !opts->unsafe;
+    int rc = emit_concept(proj, i, out_path, opts->target_triple, bounds_check);
     free(out_path);
     if (rc < 0)
       return -1;

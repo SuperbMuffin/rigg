@@ -60,13 +60,19 @@ static int is_file(const char *path)
   return stat(path, &st) == 0 && S_ISREG(st.st_mode);
 }
 
-static int run_riggc(const char *dir, int check_only)
+static int run_riggc(const char *dir, int check_only, const ProjectToml *toml, BuildFlags flags)
 {
   char cmd[4096];
+  int pos = snprintf(cmd, sizeof(cmd), "riggc");
   if (check_only)
-    snprintf(cmd, sizeof(cmd), "riggc --check %s", dir);
-  else
-    snprintf(cmd, sizeof(cmd), "riggc %s", dir);
+    pos += snprintf(cmd + pos, sizeof(cmd) - (size_t) pos, " --check");
+  if (flags.emit_ir)
+    pos += snprintf(cmd + pos, sizeof(cmd) - (size_t) pos, " --emit-ir");
+  if (flags.unsafe)
+    pos += snprintf(cmd + pos, sizeof(cmd) - (size_t) pos, " --unsafe");
+  if (toml->opt[0])
+    pos += snprintf(cmd + pos, sizeof(cmd) - (size_t) pos, " %s", toml->opt);
+  snprintf(cmd + pos, sizeof(cmd) - (size_t) pos, " %s", dir);
 
   int rc = system(cmd);
   if (rc != 0)
@@ -87,7 +93,8 @@ static int scaffold(const char *dir, const char *name)
   snprintf(toml, sizeof(toml),
            "name = \"%s\"\n"
            "version = \"0.1.0\"\n"
-           "author = \"\"\n",
+           "author = \"\"\n"
+           "opt = 0\n",
            name);
   if (write_file(path, toml) < 0)
     return -1;
@@ -157,7 +164,7 @@ int cmd_new(const char *name)
   return 0;
 }
 
-int cmd_build(const char *dir)
+int cmd_build(const char *dir, BuildFlags flags)
 {
   char toml_path[4096];
   snprintf(toml_path, sizeof(toml_path), "%s/project.toml", dir);
@@ -173,7 +180,7 @@ int cmd_build(const char *dir)
   if (toml_load(dir, &toml) < 0)
     return 1;
 
-  if (run_riggc(dir, 0) < 0)
+  if (run_riggc(dir, 0, &toml, flags) < 0)
     return 1;
 
   /* Rename build/out to build/<name> */
@@ -195,7 +202,7 @@ int cmd_build(const char *dir)
   return 0;
 }
 
-int cmd_run(const char *dir)
+int cmd_run(const char *dir, BuildFlags flags)
 {
   char toml_path[4096];
   snprintf(toml_path, sizeof(toml_path), "%s/project.toml", dir);
@@ -210,7 +217,7 @@ int cmd_run(const char *dir)
   if (toml_load(dir, &toml) < 0)
     return 1;
 
-  if (cmd_build(dir) != 0)
+  if (cmd_build(dir, flags) != 0)
     return 1;
 
   char bin[4096];
@@ -238,5 +245,10 @@ int cmd_check(const char *dir)
     return 1;
   }
 
-  return run_riggc(dir, 1) < 0 ? 1 : 0;
+  ProjectToml toml;
+  if (toml_load(dir, &toml) < 0)
+    return 1;
+
+  BuildFlags no_flags = {0};
+  return run_riggc(dir, 1, &toml, no_flags) < 0 ? 1 : 0;
 }

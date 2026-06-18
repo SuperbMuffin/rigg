@@ -1,0 +1,14 @@
+extern fn malloc(size: i32) -> ptr;
+extern fn free(p: ptr);
+
+fn test_ptr_index() {
+    let p: ptr = malloc(4);
+    p[0] = 65;
+    p[1] = 66;
+    let a: i32 = p[0];
+    let b: i32 = p[1];
+    free(p);
+}
+
+fn main() {
+}

@@ -1,4 +1,5 @@
 #include "project.h"
+#include "diag.h"
 #include "parser.h"
 #include "util.h"
 
@@ -320,13 +321,17 @@ static int detect_cycles(const Project *proj)
         if (colour[nb] == 1)
         {
           /* back-edge: find where nb appears in path and print */
-          fprintf(stderr, "Error G002: Circular dependency detected\n\n  ");
+          diag_print_error(stderr, "G002", "Circular dependency detected");
           int ci = 0;
           while (ci <= depth && path[ci] != nb)
             ci++;
-          for (int pi = ci; pi <= depth; pi++)
-            fprintf(stderr, "%s -> ", proj->concepts[path[pi]].name);
-          fprintf(stderr, "%s\n", proj->concepts[nb].name);
+          const char *cycle[32];
+          int cycle_len = 0;
+          for (int pi = ci; pi <= depth && cycle_len < 32; pi++)
+            cycle[cycle_len++] = proj->concepts[path[pi]].name;
+          if (cycle_len < 32)
+            cycle[cycle_len++] = proj->concepts[nb].name;
+          diag_print_cycle(stderr, cycle, cycle_len);
           found = 1;
           break;
         }

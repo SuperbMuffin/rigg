@@ -1,0 +1,15 @@
+fn concat(a: str, b: str) -> str
+{
+    let total_len: i64 = strlen(a) + strlen(b) + 1;
+    
+    let new_str: ptr = malloc(total_len);
+    
+    if new_str == (0 as ptr) {
+        return "";
+    }
+
+    strcpy(new_str, a);
+    strcat(new_str, b);
+    
+    return new_str as str;
+}

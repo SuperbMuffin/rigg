@@ -1,0 +1,8 @@
+fn eq(a: str, b: str) -> bool
+{
+    // strcmp returns 0 if they match exactly
+    if strcmp(a, b) == 0 {
+        return true;
+    }
+    return false;
+}

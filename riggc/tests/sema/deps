@@ -2,3 +2,4 @@ lexer.c
 parser.c
 project.c
 util.c
+diag.c

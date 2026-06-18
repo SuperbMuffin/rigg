@@ -1,0 +1,6 @@
+core_io
+core_str
+
+main:
+-> core_io
+-> core_str

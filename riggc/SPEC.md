@@ -47,6 +47,7 @@ project.meta
 
 main.fn
 
+math/
 core/
 rope/
 buffer/
@@ -58,24 +59,36 @@ editor/
 
 # Entry Point
 
-The root `main.fn` file is the program entry point.
+The root `main.fn` file is the program entry point, but it is loaded through
+the `main` concept declared in `project.meta`.
+
+A runnable project must contain both:
+
+```text
+main:
+  -> editor
+```
+
+and a root-level `main.fn`.
 
 Example:
 
 ```text
 fn main()
 {
-    editor_run()
+    editor::run();
 }
 ```
 
-Compilation begins at `main.fn`.
+Compilation begins by loading the project graph, finding the `main` concept,
+and then loading root `main.fn`.
 
 ---
 
 # Concepts
 
-A concept is a directory.
+A concept is normally a directory. The special `main` concept maps to the
+root-level `main.fn` file instead of a `main/` directory.
 
 Example:
 
@@ -206,6 +219,9 @@ Example:
 ```text
 core
 
+main:
+  -> editor
+
 rope:
   -> core
 
@@ -226,6 +242,7 @@ Meaning:
 * Terminal depends on Core
 * Buffer depends on Rope
 * Editor depends on Buffer and Terminal
+* Main depends on Editor
 
 ---
 
@@ -288,10 +305,12 @@ Compilation fails.
 2. Validate graph syntax.
 3. Detect cycles.
 4. Validate concept directories.
-5. Validate imports.
-6. Convert to LLVM IR.
-7. Compile concepts with llvm.
-8. Link executable.
+5. Load root `main.fn` through the `main` concept.
+6. Validate imports.
+7. Type-check functions.
+8. Convert to LLVM IR.
+9. Compile concepts with LLVM.
+10. Link executable.
 
 ---
 
@@ -331,6 +350,9 @@ Graph:
 ```text
 core
 
+main:
+  -> editor
+
 terminal:
   -> core
 
@@ -369,4 +391,3 @@ editor:
 ```
 
 This structure makes architecture explicit, prevents circular dependencies, and provides a high-level overview of the entire application.
-

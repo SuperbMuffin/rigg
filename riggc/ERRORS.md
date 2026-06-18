@@ -1,6 +1,8 @@
 # Rigg Compiler Errors
 
-All errors are fatal. Compilation stops on the first error unless otherwise noted.
+All reported errors are fatal. Project graph loading errors stop compilation
+immediately. Semantic checking may report multiple structured errors before
+compilation exits.
 
 Error messages follow this format:
 
@@ -16,15 +18,16 @@ Error [CODE]: <message>
 
 ## Graph Errors (G)
 
-### G001 — Invalid graph syntax
+`project.meta` parse failures are currently printed directly by the project
+loader, for example:
 
-`project.meta` could not be parsed.
-
+```text
+rigg: project.meta:4: invalid concept name 'BadName'
+rigg: project.meta:7: unknown concept 'utils'
+rigg: project.meta:9: duplicate concept 'buffer' (first declared on line 3)
 ```
-Error G001: Invalid graph syntax
 
-  --> project.meta:4
-```
+The structured graph error currently emitted by the compiler is:
 
 ### G002 — Circular dependency
 
@@ -36,37 +39,13 @@ Error G002: Circular dependency detected
   buffer -> rope -> buffer
 ```
 
-### G003 — Unknown concept in graph
-
-A concept is referenced in `project.meta` but has no matching directory.
-
-```
-Error G003: Unknown concept 'utils'
-
-  --> project.meta:7
-
-  'utils' is declared in the graph but no concept directory was found.
-```
-
-### G004 — Duplicate concept in graph
-
-A concept is declared more than once in `project.meta`.
-
-```
-Error G004: Duplicate concept 'buffer'
-
-  --> project.meta:9
-
-  'buffer' was already declared on line 3.
-```
-
 ---
 
 ## Concept Errors (C)
 
 ### C001 — Concept directory missing
 
-A concept referenced in `project.meta` has no directory.
+A non-`main` concept referenced in `project.meta` has no directory.
 
 ```
 Error C001: Missing concept directory 'rope'
@@ -139,7 +118,7 @@ Error I004: Cannot access internal function 'gap_buffer_shift'
 
 ### I005 — Unknown function in unqualified call
 
-An unqualified call refers to a function not defined anywhere in the current concept.
+An unqualified call or identifier refers to a name not defined in the current concept.
 
 ```
 Error I005: Unknown function 'flush'
@@ -147,6 +126,14 @@ Error I005: Unknown function 'flush'
   --> buffer/init.fn:9
 
   'flush' is not defined in this concept.
+```
+
+```
+Error I005: Unknown identifier 'value'
+
+  --> buffer/init.fn:9
+
+  'value' is not defined in this concept.
 ```
 
 ---
@@ -163,16 +150,16 @@ Error F001: Missing primary function in 'add.fn'
   Expected a function named 'add'.
 ```
 
-### F002 — Multiple public functions
+### F002 — Duplicate primary function
 
-A `.fn` file declares more than one function that could be considered public.
+A `.fn` file declares the primary function name more than once.
 
 ```
 Error F002: Multiple public functions in 'add.fn'
 
   --> math/add.fn:8
 
-  Only one public function is allowed per .fn file.
+  Only one function named 'add' is allowed per .fn file.
   Move helpers above the primary function or into a .impl file.
 ```
 
@@ -194,32 +181,13 @@ Error F003: Function name mismatch in 'add.fn'
 
 ### S001 — Unexpected token
 
-The parser encountered a token it did not expect.
+The parser encountered a token it did not expect. This also covers missing
+expected punctuation such as `;` or `}`.
 
 ```
 Error S001: Unexpected token '}'
 
   --> buffer/init.fn:14
-```
-
-### S002 — Missing semicolon
-
-A statement is missing a terminating semicolon.
-
-```
-Error S002: Missing semicolon
-
-  --> buffer/init.fn:9
-```
-
-### S003 — Unclosed brace
-
-A block was opened but never closed.
-
-```
-Error S003: Unclosed brace
-
-  --> buffer/init.fn:3
 ```
 
 ### S004 — Break or continue outside loop
@@ -262,14 +230,14 @@ Error T001: Type mismatch
 
 ### T002 — Unknown type
 
-An unrecognised type name was used.
+An unrecognised type name was used where a type was expected.
 
 ```
 Error T002: Unknown type 'int'
 
   --> math/add.fn:1
 
-  Did you mean 'i32'?
+  expected a type but got 'int'
 ```
 
 ### T003 — Missing return
@@ -315,17 +283,27 @@ Error T005: Reassignment of immutable variable 'x'
 
 ### E001 — Missing entry point
 
-No `main.fn` exists at the project root.
+The project has no `main` concept in `project.meta`, or the `main` concept is
+declared but root `main.fn` is missing.
 
 ```
 Error E001: Missing entry point
 
-  No main.fn found at project root.
+  No 'main' concept found in project.meta.
+  Add 'main:' with its dependencies and a root-level main.fn.
+```
+
+```
+Error E001: Missing entry point
+
+  --> project.meta:1
+
+  'main' is declared in project.meta but main.fn was not found.
 ```
 
 ### E002 — Invalid main signature
 
-`main` declares parameters.
+`main` declares parameters or returns a type other than `i32`.
 
 ```
 Error E002: Invalid main signature
@@ -333,5 +311,13 @@ Error E002: Invalid main signature
   --> main.fn:1
 
   'main' must take no arguments.
-  Expected: fn main() or fn main() -> <type>
+  Expected: fn main() or fn main() -> i32
+```
+
+```
+Error E002: Invalid main signature
+
+  --> main.fn:1
+
+  'main' may only return i32 or nothing, found 'bool'.
 ```

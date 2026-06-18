@@ -40,6 +40,8 @@ typedef enum
 
   TOK_LPAREN,      // (
   TOK_RPAREN,      // )
+  TOK_LBRACKET,    // [
+  TOK_RBRACKET,    // ]
   TOK_LBRACE,      // {
   TOK_RBRACE,      // }
   TOK_COMMA,       // ,
@@ -64,6 +66,7 @@ typedef enum
   TOK_ASSIGN,   // =
   TOK_ARROW,    // ->
   TOK_ELLIPSIS, // ...
+  TOK_AS,       // as
 
   TOK_EOF,
   TOK_ERROR,

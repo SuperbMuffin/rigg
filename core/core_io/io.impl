@@ -1,4 +1,11 @@
-extern fn printf(fmt: str, ...) -> i32;
+extern fn printf(fmt: str, ... ) -> i32;
+extern fn fprintf(stream: ptr, fmt: str, ... ) -> i32;
 
-extern fn fprintf(stream: ptr, fmt: str, ...) -> i32;
 extern var stderr: ptr;
+extern var stdout: ptr;
+
+extern fn getchar() -> i32;
+extern fn malloc(size: i32) -> ptr;
+extern fn realloc(p: ptr, size: i32) -> ptr;
+
+extern fn fflush(stream: ptr) -> i32;

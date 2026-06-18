@@ -1,0 +1,7 @@
+fn main() {
+    let a: i32 = "123" as i32;
+    let b: i64 = a as i64;
+    let c: str = b as str;
+    let s: str = true as str;
+    let f: str = false as str;
+}

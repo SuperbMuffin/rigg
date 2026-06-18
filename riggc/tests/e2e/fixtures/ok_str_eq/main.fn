@@ -1,0 +1,50 @@
+fn main() -> i32
+{
+    let a: str = "abc";
+    let b: str = "abc";
+    let c: str = "xyz";
+
+    if (a == b)
+    {
+    }
+    else
+    {
+        return 1;
+    }
+
+    if ("hello" == "hello")
+    {
+    }
+    else
+    {
+        return 2;
+    }
+
+    if (a != c)
+    {
+    }
+    else
+    {
+        return 3;
+    }
+
+    if ("abc" != "xyz")
+    {
+    }
+    else
+    {
+        return 4;
+    }
+
+    if (a == c)
+    {
+        return 5;
+    }
+
+    if (a != b)
+    {
+        return 6;
+    }
+
+    return 0;
+}

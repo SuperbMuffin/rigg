@@ -1,0 +1,14 @@
+fn str_to_num(s: str) -> i32 {
+    return s as i32;
+}
+
+fn num_to_str(n: i32) -> str {
+    return n as str;
+}
+
+fn bool_to_string(b: bool) -> str {
+    return b as str;
+}
+
+fn main() {
+}

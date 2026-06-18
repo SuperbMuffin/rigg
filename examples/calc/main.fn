@@ -1,0 +1,37 @@
+fn main()
+{
+  // since these are i32's, we don't support decimal math.
+
+  let a: str = core_io::input("First Num: ");
+  let op: str = core_io::input("Operation: ");
+  let b: str = core_io::input("Second Num: ");
+
+  if (op == "+")
+  {
+    let result: str = ((a as i32) + (b as i32)) as str;
+    let result: str = core_str::concat("Result: ", result);
+    core_io::println(result);
+  }
+  
+  if (op == "-")
+  {
+    let result: str = ((a as i32) - (b as i32)) as str;
+    let result: str = core_str::concat("Result: ", result);
+    core_io::println(result);
+  }
+
+  if (op == "*")
+  {
+    let result: str = ((a as i32) * (b as i32)) as str;
+    let result: str = core_str::concat("Result: ", result);
+    core_io::println(result);
+  }
+
+  if (op == "/")
+  {
+    let result: str = ((a as i32) / (b as i32)) as str;
+    let result: str = core_str::concat("Result: ", result);
+    core_io::println(result);
+  }
+
+}

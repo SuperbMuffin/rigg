@@ -11,7 +11,20 @@ str
 ptr
 ```
 
-No implicit numeric conversions. Types must match exactly at call sites and assignments.
+Types generally must match at call sites and assignments. Integer literals may
+be typed by their surrounding context, so `let x: i8 = 1;` is valid.
+
+Explicit casts are written with `as`.
+
+```
+let n: i32 = "42" as i32;
+let s: str = n as str;
+let p: ptr = s as ptr;
+```
+
+Supported casts include signed integer conversions, `str`/`ptr`
+representation casts, `str`/signed-integer conversions, signed-integer/`ptr`
+conversions, and `bool`/`str` conversions.
 
 ---
 
@@ -41,7 +54,8 @@ const MAX_SIZE: i32 = 256;
 const PI: f64 = 3.14159;
 ```
 
-Constants must be known at compile time. They are always immutable.
+Constants are immutable variables. Their initializer is type-checked like a
+`let` initializer.
 
 ---
 
@@ -87,6 +101,19 @@ Only `normalize` is visible outside the concept. `clamp_value` is private to the
 
 ---
 
+## Externs
+
+External functions and variables are declared at top level with `extern`.
+
+```
+extern fn printf(fmt: str, ...) -> i32;
+extern var errno: i32;
+```
+
+Variadic extern functions use `...`. Only the fixed arguments are type-checked.
+
+---
+
 ## Cross-Concept Calls
 
 Functions from another concept are called with `::` qualification.
@@ -116,6 +143,12 @@ a / b
 a % b
 ```
 
+Unary numeric negation is also supported:
+
+```
+-a
+```
+
 ### Comparison
 
 ```
@@ -134,6 +167,32 @@ a && b
 a || b
 !a
 ```
+
+### Grouping
+
+```
+(a + b) * c
+```
+
+### Cast
+
+```
+value as i32
+ptr_value as str
+```
+
+`as` binds looser than binary operators, so `a + b as str` parses as
+`(a + b) as str`.
+
+### Pointer Indexing
+
+```
+let byte: i32 = p[0];
+p[0] = 65;
+```
+
+Indexing requires a `ptr` target and an integer index. Pointer indexing reads
+and writes values typed as `i32` at the language level.
 
 ---
 
@@ -234,7 +293,13 @@ The compiler rejects functions with missing returns.
 
 ## Entry Point
 
-The root `main.fn` declares the program entry point.
+The root `main.fn` declares the program entry point and the project graph must
+declare a `main` concept.
+
+```
+main:
+  -> editor
+```
 
 ```
 fn main()
@@ -243,7 +308,7 @@ fn main()
 }
 ```
 
-`main` takes no arguments. It may optionally declare a return type.
+`main` takes no arguments. It may return `i32` or omit the return type.
 
 ```
 fn main() -> i32
@@ -260,8 +325,8 @@ fn main() -> i32
 ```
 fn       let      mut      const
 if       else     while    loop
-break    continue return   true
-false
+break    continue return   extern
+var      as       true     false
 ```
 
 ---

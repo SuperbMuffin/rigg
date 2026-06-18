@@ -1,0 +1,33 @@
+fn ptr_set(p: ptr, index: i32, value: i32) {
+    p[index] = value;
+}
+
+
+fn input(prompt: str) -> str {
+    printf(prompt);
+    fflush(stdout);
+
+    let mut size: i32 = 64;
+    let mut len: i32 = 0;
+    let mut buffer: ptr = malloc(size);
+
+    while true {
+        let c: i32 = getchar();
+
+        if c == 10 {
+            break;
+        }
+
+        if len + 1 >= size {
+            size = size * 2;
+            buffer = realloc(buffer, size);
+        }
+
+        ptr_set(buffer, len, c);
+        len = len + 1;
+    }
+
+    ptr_set(buffer, len, 0);
+
+    return buffer as str;
+}

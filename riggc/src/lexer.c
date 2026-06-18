@@ -95,6 +95,7 @@ static TokenKind keyword_or_ident(const char *start, int len)
   KW("bool", TOK_BOOL)
   KW("str", TOK_STR)
   KW("ptr", TOK_PTR)
+  KW("as", TOK_AS)
 #undef KW
   return TOK_IDENT;
 }
@@ -162,6 +163,12 @@ Token lexer_next(Lexer *l)
       break;
     case ')':
       t.kind = TOK_RPAREN;
+      break;
+    case '[':
+      t.kind = TOK_LBRACKET;
+      break;
+    case ']':
+      t.kind = TOK_RBRACKET;
       break;
     case '{':
       t.kind = TOK_LBRACE;

@@ -1,0 +1,6 @@
+fn buffer_as_str(buffer: ptr) -> str {
+    return buffer;
+}
+
+fn main() {
+}

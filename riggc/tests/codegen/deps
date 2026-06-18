@@ -3,3 +3,4 @@ parser.c
 project.c
 sema.c
 util.c
+diag.c

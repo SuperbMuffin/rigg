@@ -46,7 +46,8 @@ static int emit(const char *fixture)
 static char *read_file(const char *path)
 {
   FILE *f = fopen(path, "r");
-  if (!f) return NULL;
+  if (!f)
+    return NULL;
   fseek(f, 0, SEEK_END);
   long sz = ftell(f);
   rewind(f);
@@ -64,8 +65,7 @@ static char *ir_path(const char *fixture, const char *concept)
   return buf;
 }
 
-static void assert_ir_contains(const char *fixture, const char *concept,
-                                const char *needle)
+static void assert_ir_contains(const char *fixture, const char *concept, const char *needle)
 {
   char *src = read_file(ir_path(fixture, concept));
   ASSERT(src != NULL, "IR file exists");
@@ -81,8 +81,7 @@ static void assert_ir_contains(const char *fixture, const char *concept,
   }
 }
 
-static void assert_ir_not_contains(const char *fixture, const char *concept,
-                                    const char *needle)
+static void assert_ir_not_contains(const char *fixture, const char *concept, const char *needle)
 {
   char *src = read_file(ir_path(fixture, concept));
   ASSERT(src != NULL, "IR file exists");
@@ -198,21 +197,96 @@ static void test_ptr_type(void)
   assert_ir_contains("ptr_type", "main", "define ptr @main__test_ptr(ptr %p0)");
 }
 
+static int emit_unsafe(const char *fixture)
+{
+  Project proj;
+  if (project_load(&proj, fix(fixture)) < 0)
+    return -1;
+
+  SemaResult res;
+  sema_check(&proj, &res);
+  if (res.count > 0)
+  {
+    sema_free(&res);
+    project_free(&proj);
+    return -1;
+  }
+  sema_free(&res);
+
+  CodegenOptions opts = {.emit_ir_only = 1, .unsafe = 1};
+  int rc = codegen_run(&proj, &opts);
+  project_free(&proj);
+  return rc;
+}
+
+static void test_ptr_index(void)
+{
+  ASSERT(emit_unsafe("ptr_index") == 0, "emit succeeded");
+  assert_ir_contains("ptr_index", "main", "getelementptr i8, ptr");
+  assert_ir_contains("ptr_index", "main", "load i8, ptr");
+  assert_ir_contains("ptr_index", "main", "store i8");
+}
+
+static void test_ptr_str_cast(void)
+{
+  ASSERT(emit("ptr_str_cast") == 0, "emit succeeded");
+  assert_ir_contains("ptr_str_cast", "main", "define ptr @main__ptr_to_str(ptr %p0)");
+  assert_ir_contains("ptr_str_cast", "main", "define ptr @main__str_to_ptr(ptr %p0)");
+  assert_ir_contains("ptr_str_cast", "main", "define ptr @main__buffer_as_str(ptr %p0)");
+  assert_ir_contains("ptr_str_cast", "main", "ret ptr %2");
+  assert_ir_not_contains("ptr_str_cast", "main", "call ptr @rigg_");
+}
+
+static void test_cast_int(void)
+{
+  ASSERT(emit("cast_int") == 0, "emit succeeded");
+  assert_ir_contains("cast_int", "main", "sext i32");
+  assert_ir_contains("cast_int", "main", "trunc i64");
+}
+
+static void test_cast_str(void)
+{
+  ASSERT(emit("cast_str") == 0, "emit succeeded");
+  assert_ir_contains("cast_str", "main", "call i32 @rigg_str_to_i32(ptr");
+  assert_ir_contains("cast_str", "main", "call ptr @rigg_i32_to_str(i32");
+  assert_ir_contains("cast_str", "main", "call ptr @rigg_bool_to_str(i1");
+}
+
+static void test_numeric_edges(void)
+{
+  ASSERT(emit("numeric_edges") == 0, "emit succeeded");
+  assert_ir_contains("numeric_edges", "main", "udiv i32");
+  assert_ir_contains("numeric_edges", "main", "urem i32");
+  assert_ir_contains("numeric_edges", "main", "icmp uge i32");
+  assert_ir_contains("numeric_edges", "main", "icmp ult i32");
+  assert_ir_contains("numeric_edges", "main", "fdiv float");
+  assert_ir_contains("numeric_edges", "main", "fcmp ole float");
+  assert_ir_contains("numeric_edges", "main", "fneg float");
+  assert_ir_contains("numeric_edges", "main", "inttoptr i32");
+  assert_ir_contains("numeric_edges", "main", "ptrtoint ptr");
+  assert_ir_contains("numeric_edges", "main", "call i1 @rigg_str_to_bool(ptr");
+}
+
 /* ── main ────────────────────────────────────────────────────────────────── */
 
 int main(void)
 {
-  run_test("fn_mangle",     test_fn_mangle);
-  run_test("fn_void_main",  test_fn_void_main);
-  run_test("let_alloca",    test_let_alloca);
-  run_test("arithmetic",    test_arithmetic);
-  run_test("if_else",       test_if_else);
-  run_test("while_loop",    test_while_loop);
-  run_test("loop_break",    test_loop_break);
-  run_test("qual_call",     test_qual_call);
-  run_test("float_ops",     test_float_ops);
-  run_test("variadic_str",  test_variadic_str);
-  run_test("ptr_type",      test_ptr_type);
+  run_test("fn_mangle", test_fn_mangle);
+  run_test("fn_void_main", test_fn_void_main);
+  run_test("let_alloca", test_let_alloca);
+  run_test("arithmetic", test_arithmetic);
+  run_test("if_else", test_if_else);
+  run_test("while_loop", test_while_loop);
+  run_test("loop_break", test_loop_break);
+  run_test("qual_call", test_qual_call);
+  run_test("float_ops", test_float_ops);
+  run_test("variadic_str", test_variadic_str);
+  run_test("ptr_type", test_ptr_type);
+  run_test("ptr_index", test_ptr_index);
+  run_test("ptr_str_cast", test_ptr_str_cast);
+  run_test("cast_int", test_cast_int);
+  run_test("cast_str", test_cast_str);
+  run_test("numeric_edges", test_numeric_edges);
 
   print_summary();
   return tc_suite_failed() > 0 ? 1 : 0;

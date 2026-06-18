@@ -6,6 +6,7 @@ typedef struct
   char name[256];
   char version[64];
   char author[256];
+  char opt[8]; /* clang flag, e.g. "-O2"; empty = no optimization flag */
 } ProjectToml;
 
 /* Parse project.toml in the given project root.

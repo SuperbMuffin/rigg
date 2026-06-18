@@ -1,4 +1,5 @@
 #include "sema.h"
+#include "diag.h"
 #include "parser.h"
 #include "project.h"
 #include "util.h"
@@ -72,7 +73,8 @@ static void check_entry_point(const Project *proj, SemaResult *res)
   }
 
   const SourceFile *sf = &main_concept->files[0];
-  check_parse_errors(sf, res);
+  if (sf->parser.error_count > 0)
+    return;
 
   const FnDecl *main_fn = NULL;
   for (int i = 0; i < sf->program.fn_count; i++)
@@ -433,8 +435,16 @@ static void check_expr_imports(const Expr *expr, int concept_idx, const char *re
       check_expr_imports(expr->as.binary.left, concept_idx, rel_path, proj, res);
       check_expr_imports(expr->as.binary.right, concept_idx, rel_path, proj, res);
       break;
+    case EXPR_INDEX:
+      check_expr_imports(expr->as.index.target, concept_idx, rel_path, proj, res);
+      check_expr_imports(expr->as.index.index, concept_idx, rel_path, proj, res);
+      break;
     case EXPR_ASSIGN:
+      check_expr_imports(expr->as.assign.target, concept_idx, rel_path, proj, res);
       check_expr_imports(expr->as.assign.value, concept_idx, rel_path, proj, res);
+      break;
+    case EXPR_CAST:
+      check_expr_imports(expr->as.cast.expr, concept_idx, rel_path, proj, res);
       break;
     default:
       break;
@@ -589,6 +599,39 @@ static int is_numeric(TypeKind t)
 static int is_integer(TypeKind t)
 {
   return t >= TYPE_I8 && t <= TYPE_U64;
+}
+
+static int is_signed_int(TypeKind t)
+{
+  return t >= TYPE_I8 && t <= TYPE_I64;
+}
+
+static int cast_compatible(TypeKind from, TypeKind to)
+{
+  if (from == to)
+    return 1;
+  /* representation casts */
+  if ((from == TYPE_PTR && to == TYPE_STR) || (from == TYPE_STR && to == TYPE_PTR))
+    return 1;
+  /* integer conversions */
+  if (is_signed_int(from) && is_signed_int(to))
+    return 1;
+  /* string <-> integer */
+  if (from == TYPE_STR && is_signed_int(to))
+    return 1;
+  if (is_signed_int(from) && to == TYPE_STR)
+    return 1;
+  /* integer <-> ptr */
+  if (is_signed_int(from) && to == TYPE_PTR)
+    return 1;
+  if (from == TYPE_PTR && is_signed_int(to))
+    return 1;
+  /* boolean <-> string */
+  if (from == TYPE_BOOL && to == TYPE_STR)
+    return 1;
+  if (from == TYPE_STR && to == TYPE_BOOL)
+    return 1;
+  return 0;
 }
 
 /* -----------------------------------------------------------------------
@@ -837,31 +880,90 @@ static TypeKind infer_expr(const Expr *e, const FnDecl *fn, Scope *scope, const 
 
     case EXPR_ASSIGN:
     {
-      VarEntry *v = scope_lookup(scope, e->as.assign.name, e->as.assign.name_len);
-      if (!v)
-        return TYPE_UNKNOWN;
+      Expr *target = e->as.assign.target;
+      TypeKind rhs_type = TYPE_UNKNOWN;
 
-      if (!v->is_mut)
+      if (target->kind == EXPR_IDENT)
       {
-        push_error(res, "T005", rel_path, e->line,
-                   xsprintf("'%.*s' was declared without 'mut'.\n"
-                            "  Change to: let mut %.*s: %s = ...",
-                            e->as.assign.name_len, e->as.assign.name, e->as.assign.name_len,
-                            e->as.assign.name, type_str(v->type)),
-                   xsprintf("Reassignment of immutable variable '%.*s'", e->as.assign.name_len,
-                            e->as.assign.name));
-        return v->type;
+        VarEntry *v = scope_lookup(scope, target->as.ident.ptr, target->as.ident.len);
+        if (!v)
+          return TYPE_UNKNOWN;
+
+        if (!v->is_mut)
+        {
+          push_error(res, "T005", rel_path, e->line,
+                     xsprintf("'%.*s' was declared without 'mut'.\n"
+                              "  Change to: let mut %.*s: %s = ...",
+                              target->as.ident.len, target->as.ident.ptr, target->as.ident.len,
+                              target->as.ident.ptr, type_str(v->type)),
+                     xsprintf("Reassignment of immutable variable '%.*s'", target->as.ident.len,
+                              target->as.ident.ptr));
+          return v->type;
+        }
+
+        rhs_type = v->type;
+      }
+      else if (target->kind == EXPR_INDEX)
+      {
+        TypeKind ptr_type = infer_expr(target->as.index.target, fn, scope, rel_path, symt,
+                                       concept_idx, TYPE_UNKNOWN, res);
+        TypeKind idx_type = infer_expr(target->as.index.index, fn, scope, rel_path, symt,
+                                       concept_idx, TYPE_I32, res);
+        if (ptr_type != TYPE_PTR)
+        {
+          push_error(res, "T001", rel_path, e->line,
+                     xsprintf("Indexing requires ptr, found %s.", type_str(ptr_type)),
+                     xstrdup("Type mismatch"));
+          return TYPE_UNKNOWN;
+        }
+        if (idx_type != TYPE_UNKNOWN && !is_integer(idx_type))
+        {
+          push_error(res, "T001", rel_path, e->line,
+                     xsprintf("Index must be an integer type, found %s.", type_str(idx_type)),
+                     xstrdup("Type mismatch"));
+          return TYPE_UNKNOWN;
+        }
+        rhs_type = TYPE_I32;
+      }
+      else
+      {
+        push_error(res, "T001", rel_path, e->line, xstrdup("Invalid assignment target."),
+                   xstrdup("Type mismatch"));
+        return TYPE_UNKNOWN;
       }
 
       TypeKind rhs =
-          infer_expr(e->as.assign.value, fn, scope, rel_path, symt, concept_idx, v->type, res);
-      if (rhs != TYPE_UNKNOWN && rhs != v->type)
+          infer_expr(e->as.assign.value, fn, scope, rel_path, symt, concept_idx, rhs_type, res);
+      if (rhs != TYPE_UNKNOWN && rhs != rhs_type)
       {
         push_error(res, "T001", rel_path, e->line,
-                   xsprintf("Expected %s, found %s.", type_str(v->type), type_str(rhs)),
+                   xsprintf("Expected %s, found %s.", type_str(rhs_type), type_str(rhs)),
                    xstrdup("Type mismatch"));
       }
-      return v->type;
+      return rhs_type;
+    }
+
+    case EXPR_INDEX:
+    {
+      TypeKind target =
+          infer_expr(e->as.index.target, fn, scope, rel_path, symt, concept_idx, TYPE_UNKNOWN, res);
+      TypeKind idx =
+          infer_expr(e->as.index.index, fn, scope, rel_path, symt, concept_idx, TYPE_I32, res);
+      if (target != TYPE_PTR)
+      {
+        push_error(res, "T001", rel_path, e->line,
+                   xsprintf("Indexing requires ptr, found %s.", type_str(target)),
+                   xstrdup("Type mismatch"));
+        return TYPE_UNKNOWN;
+      }
+      if (idx != TYPE_UNKNOWN && !is_integer(idx))
+      {
+        push_error(res, "T001", rel_path, e->line,
+                   xsprintf("Index must be an integer type, found %s.", type_str(idx)),
+                   xstrdup("Type mismatch"));
+        return TYPE_UNKNOWN;
+      }
+      return TYPE_I32;
     }
 
     case EXPR_UNARY:
@@ -994,6 +1096,23 @@ static TypeKind infer_expr(const Expr *e, const FnDecl *fn, Scope *scope, const 
       check_call_args(&e->as.qual_call.args, sym, fn, scope, rel_path, e->line, symt, concept_idx,
                       res);
       return sym->return_type;
+    }
+
+    case EXPR_CAST:
+    {
+      TypeKind src =
+          infer_expr(e->as.cast.expr, fn, scope, rel_path, symt, concept_idx, TYPE_UNKNOWN, res);
+      TypeKind dst = e->as.cast.target_type;
+      if (src == TYPE_UNKNOWN)
+        return TYPE_UNKNOWN;
+      if (!cast_compatible(src, dst))
+      {
+        push_error(res, "T001", rel_path, e->line,
+                   xsprintf("Cannot cast %s to %s.", type_str(src), type_str(dst)),
+                   xstrdup("Type mismatch"));
+        return TYPE_UNKNOWN;
+      }
+      return dst;
     }
   }
 
@@ -1246,14 +1365,14 @@ void sema_print(const SemaResult *result)
   {
     const SemaError *e = &result->errors[i];
     if (i)
-      fprintf(stderr, "\n");
-    fprintf(stderr, "Error %s: %s\n", e->code, e->message);
+      fputc('\n', stderr);
+    diag_print_error(stderr, e->code, e->message);
     if (e->file && e->line)
-      fprintf(stderr, "\n  --> %s:%d\n", e->file, e->line);
+      diag_print_location(stderr, e->file, e->line);
     else if (e->file)
-      fprintf(stderr, "\n  --> %s\n", e->file);
+      diag_print_location(stderr, e->file, 0);
     if (e->context)
-      fprintf(stderr, "\n  %s\n", e->context);
+      diag_print_context(stderr, e->context);
   }
 }
 

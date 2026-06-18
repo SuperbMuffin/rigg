@@ -309,24 +309,6 @@ static Expr *parse_primary(Parser *p)
       return e;
     }
 
-    if (match(p, TOK_LPAREN))
-    {
-      Expr *e = make_expr(p, EXPR_CALL, line);
-      e->as.call.name = name;
-      e->as.call.name_len = name_len;
-      e->as.call.args = parse_arglist(p);
-      return e;
-    }
-
-    if (match(p, TOK_ASSIGN))
-    {
-      Expr *e = make_expr(p, EXPR_ASSIGN, line);
-      e->as.assign.name = name;
-      e->as.assign.name_len = name_len;
-      e->as.assign.value = parse_expr(p);
-      return e;
-    }
-
     Expr *e = make_expr(p, EXPR_IDENT, line);
     e->as.ident.ptr = name;
     e->as.ident.len = name_len;
@@ -337,6 +319,53 @@ static Expr *parse_primary(Parser *p)
              p->current.start);
   advance_token(p);
   return NULL;
+}
+
+static Expr *parse_postfix(Parser *p)
+{
+  Expr *e = parse_primary(p);
+  while (e)
+  {
+    if (match(p, TOK_LPAREN))
+    {
+      if (e->kind != EXPR_IDENT)
+      {
+        push_error(p, e->line, "S001", "expected identifier before '('");
+        return e;
+      }
+      Expr *call = make_expr(p, EXPR_CALL, e->line);
+      call->as.call.name = e->as.ident.ptr;
+      call->as.call.name_len = e->as.ident.len;
+      call->as.call.args = parse_arglist(p);
+      e = call;
+    }
+    else if (match(p, TOK_LBRACKET))
+    {
+      int line = p->previous.line;
+      Expr *idx = make_expr(p, EXPR_INDEX, line);
+      idx->as.index.target = e;
+      idx->as.index.index = parse_expr(p);
+      expect(p, TOK_RBRACKET, "']'");
+      e = idx;
+    }
+    else
+      break;
+  }
+  return e;
+}
+
+static Expr *parse_assign(Parser *p)
+{
+  Expr *e = parse_postfix(p);
+  if (e && match(p, TOK_ASSIGN))
+  {
+    int line = p->previous.line;
+    Expr *a = make_expr(p, EXPR_ASSIGN, line);
+    a->as.assign.target = e;
+    a->as.assign.value = parse_expr(p);
+    return a;
+  }
+  return e;
 }
 
 static Expr *parse_unary(Parser *p)
@@ -351,7 +380,7 @@ static Expr *parse_unary(Parser *p)
     e->as.unary.operand = parse_unary(p);
     return e;
   }
-  return parse_primary(p);
+  return parse_assign(p);
 }
 
 static int binary_precedence(TokenKind k)
@@ -408,9 +437,26 @@ static Expr *parse_binary(Parser *p, int min_prec)
   return left;
 }
 
+static Expr *parse_cast(Parser *p)
+{
+  Expr *e = parse_binary(p, 0);
+  while (e && match(p, TOK_AS))
+  {
+    int line = p->previous.line;
+    TypeKind target;
+    if (!parse_type(p, &target))
+      return e;
+    Expr *cast = make_expr(p, EXPR_CAST, line);
+    cast->as.cast.expr = e;
+    cast->as.cast.target_type = target;
+    e = cast;
+  }
+  return e;
+}
+
 static Expr *parse_expr(Parser *p)
 {
-  return parse_binary(p, 0);
+  return parse_cast(p);
 }
 
 static Block parse_block(Parser *p);
@@ -929,9 +975,19 @@ static void dump_expr(const Expr *e, int depth)
       dump_expr(e->as.binary.left, depth + 1);
       dump_expr(e->as.binary.right, depth + 1);
       break;
+    case EXPR_INDEX:
+      printf("Index\n");
+      dump_expr(e->as.index.target, depth + 1);
+      dump_expr(e->as.index.index, depth + 1);
+      break;
     case EXPR_ASSIGN:
-      printf("Assign %.*s\n", e->as.assign.name_len, e->as.assign.name);
+      printf("Assign\n");
+      dump_expr(e->as.assign.target, depth + 1);
       dump_expr(e->as.assign.value, depth + 1);
+      break;
+    case EXPR_CAST:
+      printf("Cast %s\n", type_name(e->as.cast.target_type));
+      dump_expr(e->as.cast.expr, depth + 1);
       break;
   }
 }

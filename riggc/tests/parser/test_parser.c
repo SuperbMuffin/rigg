@@ -395,7 +395,8 @@ static void test_assign(void)
   assert_ok(&p);
   Expr *e = prog.fns[0].body.stmts[0]->as.sexpr.expr;
   ASSERT(e->kind == EXPR_ASSIGN, "is assign");
-  ASSERT(memcmp(e->as.assign.name, "x", 1) == 0, "name is x");
+  ASSERT(e->as.assign.target->kind == EXPR_IDENT, "target is ident");
+  ASSERT(memcmp(e->as.assign.target->as.ident.ptr, "x", 1) == 0, "name is x");
   ASSERT(e->as.assign.value->kind == EXPR_INT_LIT, "value is int lit");
   parser_free(&p);
 }
@@ -408,6 +409,66 @@ static void test_assign_expr_rhs(void)
   Expr *e = prog.fns[0].body.stmts[0]->as.sexpr.expr;
   ASSERT(e->kind == EXPR_ASSIGN, "is assign");
   ASSERT(e->as.assign.value->kind == EXPR_BINARY, "rhs is binary expr");
+  parser_free(&p);
+}
+
+static void test_ptr_index_read(void)
+{
+  Parser p;
+  Program prog = parse("fn f() -> i32 { return p[0]; }", &p);
+  assert_ok(&p);
+  Expr *e = prog.fns[0].body.stmts[0]->as.ret.value;
+  ASSERT(e->kind == EXPR_INDEX, "is index");
+  ASSERT(e->as.index.target->kind == EXPR_IDENT, "target is ident");
+  ASSERT(e->as.index.index->kind == EXPR_INT_LIT, "index is int lit");
+  parser_free(&p);
+}
+
+static void test_ptr_index_assign(void)
+{
+  Parser p;
+  Program prog = parse("fn f() { p[0] = 65; }", &p);
+  assert_ok(&p);
+  Expr *e = prog.fns[0].body.stmts[0]->as.sexpr.expr;
+  ASSERT(e->kind == EXPR_ASSIGN, "is assign");
+  ASSERT(e->as.assign.target->kind == EXPR_INDEX, "target is index");
+  ASSERT(e->as.assign.target->as.index.index->kind == EXPR_INT_LIT, "index is int lit");
+  ASSERT(e->as.assign.value->kind == EXPR_INT_LIT, "value is int lit");
+  parser_free(&p);
+}
+
+static void test_cast_ptr_to_str(void)
+{
+  Parser p;
+  Program prog = parse("fn ptr_to_str(p: ptr) -> str { return p as str; }", &p);
+  assert_ok(&p);
+  Expr *e = prog.fns[0].body.stmts[0]->as.ret.value;
+  ASSERT(e->kind == EXPR_CAST, "is cast");
+  ASSERT(e->as.cast.target_type == TYPE_STR, "casts to str");
+  ASSERT(e->as.cast.expr->kind == EXPR_IDENT, "operand is ident");
+  parser_free(&p);
+}
+
+static void test_cast_str_to_ptr(void)
+{
+  Parser p;
+  Program prog = parse("fn f() { let p: ptr = s as ptr; }", &p);
+  assert_ok(&p);
+  Expr *e = prog.fns[0].body.stmts[0]->as.let.init;
+  ASSERT(e->kind == EXPR_CAST, "is cast");
+  ASSERT(e->as.cast.target_type == TYPE_PTR, "casts to ptr");
+  ASSERT(e->as.cast.expr->kind == EXPR_IDENT, "operand is ident");
+  parser_free(&p);
+}
+
+static void test_cast_precedence(void)
+{
+  Parser p;
+  Program prog = parse("fn f() -> str { return p + 1 as str; }", &p);
+  assert_ok(&p);
+  Expr *e = prog.fns[0].body.stmts[0]->as.ret.value;
+  ASSERT(e->kind == EXPR_CAST, "cast binds looser than +");
+  ASSERT(e->as.cast.expr->kind == EXPR_BINARY, "operand is binary +");
   parser_free(&p);
 }
 
@@ -660,6 +721,11 @@ int main(void)
   /* assignment */
   run_test("assign", test_assign);
   run_test("assign_expr_rhs", test_assign_expr_rhs);
+  run_test("ptr_index_read", test_ptr_index_read);
+  run_test("ptr_index_assign", test_ptr_index_assign);
+  run_test("cast_ptr_to_str", test_cast_ptr_to_str);
+  run_test("cast_str_to_ptr", test_cast_str_to_ptr);
+  run_test("cast_precedence", test_cast_precedence);
 
   /* grouping */
   run_test("grouped_expr", test_grouped_expr);

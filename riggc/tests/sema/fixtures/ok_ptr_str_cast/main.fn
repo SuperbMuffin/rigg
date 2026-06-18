@@ -1,0 +1,10 @@
+fn ptr_to_str(p: ptr) -> str {
+    return p as str;
+}
+
+fn str_to_ptr(s: str) -> ptr {
+    return s as ptr;
+}
+
+fn main() {
+}

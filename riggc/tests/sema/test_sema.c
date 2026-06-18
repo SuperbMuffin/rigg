@@ -1,6 +1,7 @@
 #include "project.h"
 #include "sema.h"
 #include "test_common.h"
+#include <unistd.h>
 
 /* -------------------------------------------------------------------------
  * Helpers
@@ -159,6 +160,24 @@ static void test_e001_missing_main(void)
   teardown(&proj, &res);
 }
 
+static void test_e001_declared_main_missing_file(void)
+{
+  Project proj;
+  SemaResult res;
+  ASSERT(load("e001_declared_main_missing_file", &proj, &res) == 0, "project_load succeeded");
+  assert_error(&res, "E001");
+  teardown(&proj, &res);
+}
+
+static void test_e001_main_fn_missing_main_function(void)
+{
+  Project proj;
+  SemaResult res;
+  ASSERT(load("e001_main_fn_missing_main_function", &proj, &res) == 0, "project_load succeeded");
+  assert_has_error(&res, "F001");
+  teardown(&proj, &res);
+}
+
 /* -------------------------------------------------------------------------
  * E002 — invalid main signature (params only; return type is now allowed)
  * ---------------------------------------------------------------------- */
@@ -168,6 +187,15 @@ static void test_e002_main_has_params(void)
   Project proj;
   SemaResult res;
   ASSERT(load("e002_main_has_params", &proj, &res) == 0, "project_load succeeded");
+  assert_error(&res, "E002");
+  teardown(&proj, &res);
+}
+
+static void test_e002_main_bad_return_type(void)
+{
+  Project proj;
+  SemaResult res;
+  ASSERT(load("e002_main_bad_return_type", &proj, &res) == 0, "project_load succeeded");
   assert_error(&res, "E002");
   teardown(&proj, &res);
 }
@@ -197,6 +225,15 @@ static void test_f003_name_mismatch(void)
   SemaResult res;
   ASSERT(load("f003_name_mismatch", &proj, &res) == 0, "project_load succeeded");
   assert_error(&res, "F003");
+  teardown(&proj, &res);
+}
+
+static void test_f002_duplicate_primary(void)
+{
+  Project proj;
+  SemaResult res;
+  ASSERT(load("f002_duplicate_primary", &proj, &res) == 0, "project_load succeeded");
+  assert_error(&res, "F002");
   teardown(&proj, &res);
 }
 
@@ -314,39 +351,59 @@ static void test_s001_parse_error_surfaced(void)
   teardown(&proj, &res);
 }
 
+static void assert_no_duplicate_errors(const SemaResult *res)
+{
+  for (int i = 0; i < res->count; i++)
+  {
+    for (int j = i + 1; j < res->count; j++)
+    {
+      const SemaError *a = &res->errors[i];
+      const SemaError *b = &res->errors[j];
+      int same_file = (a->file == NULL && b->file == NULL) ||
+                      (a->file && b->file && strcmp(a->file, b->file) == 0);
+      if (strcmp(a->code, b->code) == 0 && a->line == b->line && same_file &&
+          strcmp(a->message, b->message) == 0)
+      {
+        char msg[256];
+        snprintf(msg, sizeof(msg), "duplicate error %s at %s:%d", a->code,
+                 a->file ? a->file : "<no file>", a->line);
+        ASSERT(0, msg);
+      }
+    }
+  }
+}
+
 static void test_parse_errors_not_doubled(void)
 {
-  /* Each parse error must appear exactly once in the sema output */
   Project proj;
   SemaResult res;
   ASSERT(load("s001_parse_error", &proj, &res) == 0, "project_load succeeded");
-  int count = 0;
-  for (int i = 0; i < res.count; i++)
-    if (strcmp(res.errors[i].code, "S001") == 0)
-      count++;
-  ASSERT(count >= 1, "at least one S001");
-  /* The guard: run sema twice on the same project and confirm the error count
-     doesn't grow — if errors were being doubled each sema_check call would
-     add duplicates. We do this by checking the total error count is stable
-     across two runs on a fresh project load. */
-  sema_free(&res);
-  project_free(&proj);
-  Project proj2;
-  SemaResult res2;
-  ASSERT(project_load(&proj2, fix("s001_parse_error")) == 0, "second load ok");
-  sema_check(&proj2, &res2);
-  int count2 = 0;
-  for (int i = 0; i < res2.count; i++)
-    if (strcmp(res2.errors[i].code, "S001") == 0)
-      count2++;
-  ASSERT(count == count2, "error count stable across runs — not doubled");
-  sema_free(&res2);
-  project_free(&proj2);
+  assert_no_duplicate_errors(&res);
+  teardown(&proj, &res);
+}
+
+static void test_s001_main_parse_error_not_doubled(void)
+{
+  Project proj;
+  SemaResult res;
+  ASSERT(load("s001_main_parse_error", &proj, &res) == 0, "project_load succeeded");
+  assert_error(&res, "S001");
+  assert_no_duplicate_errors(&res);
+  teardown(&proj, &res);
 }
 
 /* -------------------------------------------------------------------------
  * T001 — type mismatch
  * ---------------------------------------------------------------------- */
+
+static void test_t001_ptr_index_non_ptr(void)
+{
+  Project proj;
+  SemaResult res;
+  ASSERT(load("t001_ptr_index_non_ptr", &proj, &res) == 0, "project_load succeeded");
+  assert_has_error(&res, "T001");
+  teardown(&proj, &res);
+}
 
 static void test_t001_type_mismatch(void)
 {
@@ -354,6 +411,51 @@ static void test_t001_type_mismatch(void)
   SemaResult res;
   ASSERT(load("t001_type_mismatch", &proj, &res) == 0, "project_load succeeded");
   assert_error(&res, "T001");
+  teardown(&proj, &res);
+}
+
+static void test_ok_ptr_str_cast(void)
+{
+  Project proj;
+  SemaResult res;
+  ASSERT(load("ok_ptr_str_cast", &proj, &res) == 0, "project_load succeeded");
+  assert_ok(&res);
+  teardown(&proj, &res);
+}
+
+static void test_ok_cast_conversions(void)
+{
+  Project proj;
+  SemaResult res;
+  ASSERT(load("ok_cast_conversions", &proj, &res) == 0, "project_load succeeded");
+  assert_ok(&res);
+  teardown(&proj, &res);
+}
+
+static void test_t001_invalid_cast(void)
+{
+  Project proj;
+  SemaResult res;
+  ASSERT(load("t001_invalid_cast", &proj, &res) == 0, "project_load succeeded");
+  assert_has_error(&res, "T001");
+  teardown(&proj, &res);
+}
+
+static void test_t001_implicit_ptr_str_return(void)
+{
+  Project proj;
+  SemaResult res;
+  ASSERT(load("t001_implicit_ptr_str_return", &proj, &res) == 0, "project_load succeeded");
+  assert_has_error(&res, "T001");
+  teardown(&proj, &res);
+}
+
+static void test_t001_implicit_ptr_str_let(void)
+{
+  Project proj;
+  SemaResult res;
+  ASSERT(load("t001_implicit_ptr_str_let", &proj, &res) == 0, "project_load succeeded");
+  assert_has_error(&res, "T001");
   teardown(&proj, &res);
 }
 
@@ -414,6 +516,39 @@ static void test_ok_no_spurious_errors(void)
   teardown(&proj, &res);
 }
 
+static void test_sema_print_formats_errors(void)
+{
+  Project proj;
+  SemaResult res;
+  ASSERT(load("e002_main_has_params", &proj, &res) == 0, "project_load succeeded");
+  assert_error(&res, "E002");
+
+  int saved = dup(fileno(stderr));
+  FILE *tmp = tmpfile();
+  ASSERT(saved >= 0, "saved stderr");
+  ASSERT(tmp != NULL, "opened temp file");
+
+  if (saved >= 0 && tmp)
+  {
+    ASSERT(dup2(fileno(tmp), fileno(stderr)) >= 0, "redirected stderr");
+    sema_print(&res);
+    fflush(stderr);
+    ASSERT(dup2(saved, fileno(stderr)) >= 0, "restored stderr");
+    close(saved);
+
+    fseek(tmp, 0, SEEK_SET);
+    char buf[512];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, tmp);
+    buf[n] = '\0';
+    ASSERT(strstr(buf, "Error E002: Invalid main signature") != NULL, "printed diagnostic header");
+    ASSERT(strstr(buf, "--> main.fn:1") != NULL, "printed diagnostic location");
+    ASSERT(strstr(buf, "'main' must take no arguments.") != NULL, "printed diagnostic context");
+    fclose(tmp);
+  }
+
+  teardown(&proj, &res);
+}
+
 static void test_t001_call_return_type(void)
 {
   Project proj;
@@ -443,7 +578,6 @@ static void test_t001_call_arg_count(void)
 /* -------------------------------------------------------------------------
  * entry point
  * ---------------------------------------------------------------------- */
-
 
 /* -------------------------------------------------------------------------
  * S004 — break/continue outside loop
@@ -523,10 +657,14 @@ int main(void)
 
   /* entry point */
   run_test("e001_missing_main", test_e001_missing_main);
+  run_test("e001_declared_main_missing_file", test_e001_declared_main_missing_file);
+  run_test("e001_main_fn_missing_main_function", test_e001_main_fn_missing_main_function);
   run_test("e002_main_has_params", test_e002_main_has_params);
+  run_test("e002_main_bad_return_type", test_e002_main_bad_return_type);
 
   /* file structure */
   run_test("f001_missing_primary", test_f001_missing_primary);
+  run_test("f002_duplicate_primary", test_f002_duplicate_primary);
   run_test("f003_name_mismatch", test_f003_name_mismatch);
 
   /* concept directories */
@@ -543,15 +681,23 @@ int main(void)
   /* parse error surfacing */
   run_test("s001_parse_error_surfaced", test_s001_parse_error_surfaced);
   run_test("parse_errors_not_doubled", test_parse_errors_not_doubled);
+  run_test("s001_main_parse_error_not_doubled", test_s001_main_parse_error_not_doubled);
 
   /* types */
   run_test("t001_type_mismatch", test_t001_type_mismatch);
+  run_test("t001_ptr_index_non_ptr", test_t001_ptr_index_non_ptr);
+  run_test("ok_ptr_str_cast", test_ok_ptr_str_cast);
+  run_test("ok_cast_conversions", test_ok_cast_conversions);
+  run_test("t001_invalid_cast", test_t001_invalid_cast);
+  run_test("t001_implicit_ptr_str_return", test_t001_implicit_ptr_str_return);
+  run_test("t001_implicit_ptr_str_let", test_t001_implicit_ptr_str_let);
   run_test("t003_missing_return", test_t003_missing_return);
   run_test("t004_return_in_void", test_t004_return_in_void);
   run_test("t005_immutable_reassign", test_t005_immutable_reassign);
 
   /* regression */
   run_test("ok_no_spurious_errors", test_ok_no_spurious_errors);
+  run_test("sema_print_formats_errors", test_sema_print_formats_errors);
 
   run_test("t001_call_return_type", test_t001_call_return_type);
   run_test("t001_call_arg_type", test_t001_call_arg_type);

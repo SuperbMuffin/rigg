@@ -1,0 +1,4 @@
+fn main() {
+    let p: ptr = 0;
+    let s: str = p;
+}
