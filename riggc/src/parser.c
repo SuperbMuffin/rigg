@@ -81,67 +81,65 @@ static int match(Parser *p, TokenKind k)
   return 1;
 }
 
+static void report_s001(Parser *p, int line, const char *fmt, ...)
+{
+  if (p->recovering)
+    return;
+
+  va_list ap;
+  va_start(ap, fmt);
+  int n = vsnprintf(NULL, 0, fmt, ap);
+  va_end(ap);
+  char *buf = malloc((size_t) n + 1);
+  va_start(ap, fmt);
+  vsnprintf(buf, (size_t) n + 1, fmt, ap);
+  va_end(ap);
+  push_error(p, line, "S001", "%s", buf);
+  free(buf);
+  p->recovering = 1;
+}
+
 static int expect(Parser *p, TokenKind k, const char *what)
 {
   if (match(p, k))
     return 1;
-  push_error(p, p->current.line, "S001", "expected %s but got '%.*s'", what, p->current.len,
-             p->current.start);
+  report_s001(p, p->current.line, "expected %s but got '%.*s'", what, p->current.len,
+              p->current.start);
   return 0;
 }
 
-/* Skip to the next clean statement/declaration boundary after an error.
-   in_block=1 when inside a block: TOK_FN is not a safe stop there because
-   parse_block would re-enter parse_stmt, hit the default branch, fail, and
-   synchronise back to TOK_FN again — infinite loop. */
+/* Skip to the next clean statement/declaration boundary after an error. */
 static void synchronise(Parser *p, int in_block)
 {
-  switch (p->current.kind)
-  {
-    case TOK_FN:
-      if (!in_block)
-        return;
-      break;
-    case TOK_LET:
-    case TOK_CONST:
-    case TOK_RETURN:
-    case TOK_IF:
-    case TOK_FOR:
-    case TOK_WHILE:
-    case TOK_LOOP:
-    case TOK_RBRACE:
-    case TOK_EOF:
-      return;
-    default:
-      break;
-  }
   while (p->current.kind != TOK_EOF)
   {
+    if (p->current.kind == TOK_RBRACE)
+    {
+      if (in_block)
+        return;
+      advance_token(p);
+      return;
+    }
+    if (p->current.kind == TOK_FN && !in_block)
+      return;
     advance_token(p);
     if (p->previous.kind == TOK_SEMI)
       return;
-    switch (p->current.kind)
-    {
-      case TOK_FN:
-        if (!in_block)
-          return;
-        break;
-      case TOK_LET:
-      case TOK_CONST:
-      case TOK_RETURN:
-      case TOK_IF:
-      case TOK_WHILE:
-      case TOK_LOOP:
-      case TOK_RBRACE:
-        return;
-      default:
-        break;
-    }
   }
+}
+
+static void recover(Parser *p, int in_block)
+{
+  if (!p->recovering)
+    return;
+  synchronise(p, in_block);
+  p->recovering = 0;
 }
 
 static int parse_type(Parser *p, TypeKind *out)
 {
+  if (p->recovering)
+    return 0;
   switch (p->current.kind)
   {
     case TOK_I8:
@@ -220,9 +218,15 @@ static ArgList parse_arglist(Parser *p)
         args = safe_realloc(args, argc_cap * sizeof(Expr *));
       }
       args[argc++] = parse_expr(p);
+      if (p->recovering || !args[argc - 1])
+        break;
     } while (match(p, TOK_COMMA));
   }
-  expect(p, TOK_RPAREN, "')'");
+  if (!expect(p, TOK_RPAREN, "')'"))
+  {
+    free(args);
+    return al;
+  }
   if (argc)
   {
     Expr **arena_args = arena_alloc(p, argc * sizeof(Expr *));
@@ -291,7 +295,8 @@ static Expr *parse_primary(Parser *p)
   if (match(p, TOK_LPAREN))
   {
     Expr *e = parse_expr(p);
-    expect(p, TOK_RPAREN, "')'");
+    if (!e || !expect(p, TOK_RPAREN, "')'"))
+      return NULL;
     return e;
   }
 
@@ -308,9 +313,13 @@ static Expr *parse_primary(Parser *p)
       e->as.qual_call.concept_len = name_len;
       e->as.qual_call.name = p->current.start;
       e->as.qual_call.name_len = p->current.len;
-      expect(p, TOK_IDENT, "function name after '::'");
-      expect(p, TOK_LPAREN, "'('");
+      if (!expect(p, TOK_IDENT, "function name after '::'"))
+        return NULL;
+      if (!expect(p, TOK_LPAREN, "'('"))
+        return NULL;
       e->as.qual_call.args = parse_arglist(p);
+      if (p->recovering)
+        return NULL;
       return e;
     }
 
@@ -320,9 +329,8 @@ static Expr *parse_primary(Parser *p)
     return e;
   }
 
-  push_error(p, line, "S001", "expected expression but got '%.*s'", p->current.len,
-             p->current.start);
-  advance_token(p);
+  report_s001(p, line, "expected expression but got '%.*s'", p->current.len,
+              p->current.start);
   return NULL;
 }
 
@@ -335,13 +343,15 @@ static Expr *parse_postfix(Parser *p)
     {
       if (e->kind != EXPR_IDENT)
       {
-        push_error(p, e->line, "S001", "expected identifier before '('");
-        return e;
+        report_s001(p, e->line, "expected identifier before '('");
+        return NULL;
       }
       Expr *call = make_expr(p, EXPR_CALL, e->line);
       call->as.call.name = e->as.ident.ptr;
       call->as.call.name_len = e->as.ident.len;
       call->as.call.args = parse_arglist(p);
+      if (p->recovering)
+        return NULL;
       e = call;
     }
     else if (match(p, TOK_LBRACKET))
@@ -350,7 +360,8 @@ static Expr *parse_postfix(Parser *p)
       Expr *idx = make_expr(p, EXPR_INDEX, line);
       idx->as.index.target = e;
       idx->as.index.index = parse_expr(p);
-      expect(p, TOK_RBRACKET, "']'");
+      if (!expect(p, TOK_RBRACKET, "']'"))
+        return NULL;
       e = idx;
     }
     else if (match(p, TOK_PLUS_PLUS) || match(p, TOK_MINUS_MINUS))
@@ -377,6 +388,8 @@ static Expr *parse_assign(Parser *p)
     Expr *a = make_expr(p, EXPR_ASSIGN, line);
     a->as.assign.target = e;
     a->as.assign.value = parse_expr(p);
+    if (p->recovering)
+      return NULL;
     return a;
   }
   return e;
@@ -442,6 +455,8 @@ static Expr *parse_binary(Parser *p, int min_prec)
     TokenKind op = p->current.kind;
     advance_token(p);
     Expr *right = parse_binary(p, prec + 1);
+    if (!right)
+      return NULL;
     Expr *e = make_expr(p, EXPR_BINARY, line);
     e->as.binary.op = op;
     e->as.binary.left = left;
@@ -459,7 +474,7 @@ static Expr *parse_cast(Parser *p)
     int line = p->previous.line;
     TypeKind target;
     if (!parse_type(p, &target))
-      return e;
+      return NULL;
     Expr *cast = make_expr(p, EXPR_CAST, line);
     cast->as.cast.expr = e;
     cast->as.cast.target_type = target;
@@ -489,53 +504,70 @@ static Stmt *make_stmt(Parser *p, StmtKind kind, int line)
 static Stmt *parse_let(Parser *p)
 {
   int line = p->current.line;
-  expect(p, TOK_LET, "'let'");
+  if (!expect(p, TOK_LET, "'let'"))
+    return NULL;
   Stmt *s = make_stmt(p, STMT_LET, line);
   s->as.let.is_mut = match(p, TOK_MUT);
   s->as.let.name = p->current.start;
   s->as.let.name_len = p->current.len;
-  expect(p, TOK_IDENT, "variable name");
-  expect(p, TOK_COLON, "':'");
-  parse_type(p, &s->as.let.type);
-  expect(p, TOK_ASSIGN, "'='");
+  if (!expect(p, TOK_IDENT, "variable name"))
+    return NULL;
+  if (!expect(p, TOK_COLON, "':'"))
+    return NULL;
+  if (!parse_type(p, &s->as.let.type))
+    return NULL;
+  if (!expect(p, TOK_ASSIGN, "'='"))
+    return NULL;
   s->as.let.init = parse_expr(p);
-  expect(p, TOK_SEMI, "';'");
+  if (!expect(p, TOK_SEMI, "';'"))
+    return NULL;
   return s;
 }
 
 static Stmt *parse_const(Parser *p)
 {
   int line = p->current.line;
-  expect(p, TOK_CONST, "'const'");
+  if (!expect(p, TOK_CONST, "'const'"))
+    return NULL;
   Stmt *s = make_stmt(p, STMT_CONST, line);
   s->as.konst.name = p->current.start;
   s->as.konst.name_len = p->current.len;
-  expect(p, TOK_IDENT, "constant name");
-  expect(p, TOK_COLON, "':'");
-  parse_type(p, &s->as.konst.type);
-  expect(p, TOK_ASSIGN, "'='");
+  if (!expect(p, TOK_IDENT, "constant name"))
+    return NULL;
+  if (!expect(p, TOK_COLON, "':'"))
+    return NULL;
+  if (!parse_type(p, &s->as.konst.type))
+    return NULL;
+  if (!expect(p, TOK_ASSIGN, "'='"))
+    return NULL;
   s->as.konst.init = parse_expr(p);
-  expect(p, TOK_SEMI, "';'");
+  if (!expect(p, TOK_SEMI, "';'"))
+    return NULL;
   return s;
 }
 
 static Stmt *parse_return(Parser *p)
 {
   int line = p->current.line;
-  expect(p, TOK_RETURN, "'return'");
+  if (!expect(p, TOK_RETURN, "'return'"))
+    return NULL;
   Stmt *s = make_stmt(p, STMT_RETURN, line);
   if (!check(p, TOK_SEMI))
     s->as.ret.value = parse_expr(p);
-  expect(p, TOK_SEMI, "';'");
+  if (!expect(p, TOK_SEMI, "';'"))
+    return NULL;
   return s;
 }
 
 static Stmt *parse_if(Parser *p)
 {
   int line = p->current.line;
-  expect(p, TOK_IF, "'if'");
+  if (!expect(p, TOK_IF, "'if'"))
+    return NULL;
   Stmt *s = make_stmt(p, STMT_IF, line);
   s->as.sif.cond = parse_expr(p);
+  if (!s->as.sif.cond && p->recovering)
+    return NULL;
   s->as.sif.then_block = parse_block(p);
   if (match(p, TOK_ELSE))
   {
@@ -543,6 +575,8 @@ static Stmt *parse_if(Parser *p)
     {
       /* else if — wrap nested if as single-statement else block */
       Stmt *nested = parse_if(p);
+      if (!nested && p->recovering)
+        return NULL;
       Stmt **arena_s = arena_alloc(p, sizeof(Stmt *));
       arena_s[0] = nested;
       s->as.sif.else_block.stmts = arena_s;
@@ -559,9 +593,12 @@ static Stmt *parse_if(Parser *p)
 static Stmt *parse_while(Parser *p)
 {
   int line = p->current.line;
-  expect(p, TOK_WHILE, "'while'");
+  if (!expect(p, TOK_WHILE, "'while'"))
+    return NULL;
   Stmt *s = make_stmt(p, STMT_WHILE, line);
   s->as.swhile.cond = parse_expr(p);
+  if (!s->as.swhile.cond && p->recovering)
+    return NULL;
   s->as.swhile.body = parse_block(p);
   return s;
 }
@@ -569,14 +606,24 @@ static Stmt *parse_while(Parser *p)
 static Stmt *parse_for(Parser *p)
 {
   int line = p->current.line;
-  expect(p, TOK_FOR, "'for'");
+  if (!expect(p, TOK_FOR, "'for'"))
+    return NULL;
   Stmt *s = make_stmt(p, STMT_FOR, line);
-  expect(p, TOK_LPAREN, "'('");
+  if (!expect(p, TOK_LPAREN, "'('"))
+    return NULL;
   s->as.sfor.init = parse_let(p);
+  if (!s->as.sfor.init && p->recovering)
+    return NULL;
   s->as.sfor.cond = parse_expr(p);
-  expect(p, TOK_SEMI, "';'");
+  if (!s->as.sfor.cond && p->recovering)
+    return NULL;
+  if (!expect(p, TOK_SEMI, "';'"))
+    return NULL;
   s->as.sfor.post = parse_expr(p);
-  expect(p, TOK_RPAREN, "')'");
+  if (!s->as.sfor.post && p->recovering)
+    return NULL;
+  if (!expect(p, TOK_RPAREN, "')'"))
+    return NULL;
   s->as.sfor.body = parse_block(p);
   return s;
 }
@@ -584,7 +631,8 @@ static Stmt *parse_for(Parser *p)
 static Stmt *parse_loop(Parser *p)
 {
   int line = p->current.line;
-  expect(p, TOK_LOOP, "'loop'");
+  if (!expect(p, TOK_LOOP, "'loop'"))
+    return NULL;
   Stmt *s = make_stmt(p, STMT_LOOP, line);
   s->as.sloop.body = parse_block(p);
   return s;
@@ -613,26 +661,26 @@ static Stmt *parse_stmt(Parser *p)
     {
       Stmt *s = make_stmt(p, STMT_BREAK, line);
       advance_token(p);
-      expect(p, TOK_SEMI, "';'");
+      if (!expect(p, TOK_SEMI, "';'"))
+        return NULL;
       return s;
     }
     case TOK_CONTINUE:
     {
       Stmt *s = make_stmt(p, STMT_CONTINUE, line);
       advance_token(p);
-      expect(p, TOK_SEMI, "';'");
+      if (!expect(p, TOK_SEMI, "';'"))
+        return NULL;
       return s;
     }
     default:
     {
       Stmt *s = make_stmt(p, STMT_EXPR, line);
       s->as.sexpr.expr = parse_expr(p);
-      expect(p, TOK_SEMI, "';'");
       if (!s->as.sexpr.expr)
-      {
-        synchronise(p, /*in_block=*/1);
         return NULL;
-      }
+      if (!expect(p, TOK_SEMI, "';'"))
+        return NULL;
       return s;
     }
   }
@@ -641,14 +689,21 @@ static Stmt *parse_stmt(Parser *p)
 static Block parse_block(Parser *p)
 {
   Block b = {0};
-  expect(p, TOK_LBRACE, "'{'");
+  if (!expect(p, TOK_LBRACE, "'{'"))
+  {
+    recover(p, 1);
+    return b;
+  }
   Stmt **stmts = NULL;
   int count = 0, cap = 0;
   while (!check(p, TOK_RBRACE) && !check(p, TOK_EOF))
   {
     Stmt *s = parse_stmt(p);
     if (!s)
+    {
+      recover(p, 1);
       continue;
+    }
     if (count == cap)
     {
       cap = cap ? cap * 2 : 8;
@@ -656,7 +711,12 @@ static Block parse_block(Parser *p)
     }
     stmts[count++] = s;
   }
-  expect(p, TOK_RBRACE, "'}'");
+  if (!expect(p, TOK_RBRACE, "'}'"))
+  {
+    free(stmts);
+    recover(p, 1);
+    return b;
+  }
   if (count)
   {
     Stmt **arena_stmts = arena_alloc(p, count * sizeof(Stmt *));
@@ -672,13 +732,16 @@ static Block parse_block(Parser *p)
 static FnDecl parse_fn(Parser *p)
 {
   FnDecl f = {0};
-  expect(p, TOK_FN, "'fn'");
+  if (!expect(p, TOK_FN, "'fn'"))
+    return f;
   /* Capture line after consuming 'fn' so it points at the function name */
   f.line = p->current.line;
   f.name = p->current.start;
   f.name_len = p->current.len;
-  expect(p, TOK_IDENT, "function name");
-  expect(p, TOK_LPAREN, "'('");
+  if (!expect(p, TOK_IDENT, "function name"))
+    return f;
+  if (!expect(p, TOK_LPAREN, "'('"))
+    return f;
 
   Param *params = NULL;
   int pcount = 0, pcap = 0;
@@ -699,11 +762,18 @@ static FnDecl parse_fn(Parser *p)
       if (!expect(p, TOK_COLON, "':'"))
         break;
       if (!parse_type(p, &pm.type))
-        break;
+      {
+        free(params);
+        return f;
+      }
       params[pcount++] = pm;
     } while (match(p, TOK_COMMA));
   }
-  expect(p, TOK_RPAREN, "')'");
+  if (!expect(p, TOK_RPAREN, "')'"))
+  {
+    free(params);
+    return f;
+  }
 
   if (pcount)
   {
@@ -713,20 +783,27 @@ static FnDecl parse_fn(Parser *p)
     f.params = arena_params;
   }
   f.param_count = pcount;
-  free(params);
 
   f.return_type = TYPE_VOID;
   if (match(p, TOK_ARROW))
-    parse_type(p, &f.return_type);
+  {
+    if (!parse_type(p, &f.return_type))
+    {
+      free(params);
+      return f;
+    }
+  }
 
   f.body = parse_block(p);
+  free(params);
   return f;
 }
 
 static ExternDecl parse_extern(Parser *p)
 {
   ExternDecl e = {0};
-  expect(p, TOK_EXTERN, "'extern'");
+  if (!expect(p, TOK_EXTERN, "'extern'"))
+    return e;
   e.line = p->current.line;
 
   if (match(p, TOK_VAR))
@@ -734,19 +811,26 @@ static ExternDecl parse_extern(Parser *p)
     e.kind = EXTERN_VAR;
     e.name = p->current.start;
     e.name_len = p->current.len;
-    expect(p, TOK_IDENT, "variable name");
-    expect(p, TOK_COLON, "':'");
-    parse_type(p, &e.return_type);
-    expect(p, TOK_SEMI, "';'");
+    if (!expect(p, TOK_IDENT, "variable name"))
+      return e;
+    if (!expect(p, TOK_COLON, "':'"))
+      return e;
+    if (!parse_type(p, &e.return_type))
+      return e;
+    if (!expect(p, TOK_SEMI, "';'"))
+      return e;
     return e;
   }
 
-  expect(p, TOK_FN, "'fn'");
+  if (!expect(p, TOK_FN, "'fn'"))
+    return e;
   e.kind = EXTERN_FN;
   e.name = p->current.start;
   e.name_len = p->current.len;
-  expect(p, TOK_IDENT, "function name");
-  expect(p, TOK_LPAREN, "'('");
+  if (!expect(p, TOK_IDENT, "function name"))
+    return e;
+  if (!expect(p, TOK_LPAREN, "'('"))
+    return e;
 
   Param *params = NULL;
   int pcount = 0, pcap = 0;
@@ -771,7 +855,10 @@ static ExternDecl parse_extern(Parser *p)
     if (!expect(p, TOK_COLON, "':'"))
       break;
     if (!parse_type(p, &pm.type))
-      break;
+    {
+      free(params);
+      return e;
+    }
     params[pcount++] = pm;
     if (!check(p, TOK_RPAREN) && !check(p, TOK_ELLIPSIS))
     {
@@ -783,7 +870,11 @@ static ExternDecl parse_extern(Parser *p)
       match(p, TOK_COMMA);
     }
   }
-  expect(p, TOK_RPAREN, "')'");
+  if (!expect(p, TOK_RPAREN, "')'"))
+  {
+    free(params);
+    return e;
+  }
 
   if (pcount)
   {
@@ -793,13 +884,23 @@ static ExternDecl parse_extern(Parser *p)
     e.params = arena_params;
   }
   e.param_count = pcount;
-  free(params);
 
   e.return_type = TYPE_VOID;
   if (match(p, TOK_ARROW))
-    parse_type(p, &e.return_type);
+  {
+    if (!parse_type(p, &e.return_type))
+    {
+      free(params);
+      return e;
+    }
+  }
 
-  expect(p, TOK_SEMI, "';'");
+  if (!expect(p, TOK_SEMI, "';'"))
+  {
+    free(params);
+    return e;
+  }
+  free(params);
   return e;
 }
 
@@ -824,21 +925,23 @@ Program parser_run(Parser *p)
   {
     if (check(p, TOK_EXTERN))
     {
+      int start_errors = p->error_count;
       if (ecount == ecap)
       {
         ecap = ecap ? ecap * 2 : 4;
         externs = safe_realloc(externs, ecap * sizeof(ExternDecl));
       }
-      externs[ecount++] = parse_extern(p);
+      ExternDecl e = parse_extern(p);
+      if (p->error_count == start_errors)
+        externs[ecount++] = e;
+      recover(p, 0);
       continue;
     }
     if (!check(p, TOK_FN))
     {
-      push_error(p, p->current.line, "S001",
-                 "expected 'fn' or 'extern' at top level but got '%.*s'", p->current.len,
-                 p->current.start);
-      advance_token(p);
-      synchronise(p, /*in_block=*/0);
+      report_s001(p, p->current.line, "expected 'fn' or 'extern' at top level but got '%.*s'",
+                  p->current.len, p->current.start);
+      recover(p, 0);
       continue;
     }
     if (fcount == fcap)
@@ -846,7 +949,11 @@ Program parser_run(Parser *p)
       fcap = fcap ? fcap * 2 : 8;
       fns = safe_realloc(fns, fcap * sizeof(FnDecl));
     }
-    fns[fcount++] = parse_fn(p);
+    int start_errors = p->error_count;
+    FnDecl f = parse_fn(p);
+    if (p->error_count == start_errors)
+      fns[fcount++] = f;
+    recover(p, 0);
   }
 
   if (fcount)

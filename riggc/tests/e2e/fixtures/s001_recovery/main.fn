@@ -1,0 +1,7 @@
+fn bad() {
+    let = ;
+}
+
+fn main() {
+    return;
+}

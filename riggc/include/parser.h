@@ -261,6 +261,7 @@ typedef struct
   size_t arena_used;
   size_t arena_cap;
   int arena_exhausted; /* set when arena runs out; parse aborts gracefully */
+  int recovering;      /* set while skipping tokens after an S001 */
 } Parser;
 
 void parser_init(Parser *p, const char *src, size_t arena_size);

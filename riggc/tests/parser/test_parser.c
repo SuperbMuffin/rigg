@@ -38,6 +38,17 @@ static void assert_has_errors(const Parser *p)
   ASSERT(p->error_count > 0, "expected parse errors but got none");
 }
 
+static int count_errors(const Parser *p, const char *code)
+{
+  int count = 0;
+  for (int i = 0; i < p->error_count; i++)
+  {
+    if (strcmp(p->errors[i].code, code) == 0)
+      count++;
+  }
+  return count;
+}
+
 /* -------------------------------------------------------------------------
  * function declarations
  * ---------------------------------------------------------------------- */
@@ -633,7 +644,9 @@ static void test_error_on_top_level_non_fn(void)
 {
   Parser p;
   parse("let x: i32 = 1;", &p);
-  assert_has_errors(&p);
+  ASSERT_EQ_INT(p.error_count, 1, "one parse error");
+  ASSERT_EQ_INT(count_errors(&p, "S001"), 1, "one S001");
+  ASSERT(p.errors[0].line == 1, "error is on line 1");
   parser_free(&p);
 }
 
@@ -652,7 +665,8 @@ static void test_error_recovers_second_fn(void)
   Program prog = parse("fn bad() { let = ; }\n"
                        "fn good() { return; }\n",
                        &p);
-  assert_has_errors(&p);
+  ASSERT_EQ_INT(p.error_count, 1, "one parse error");
+  ASSERT_EQ_INT(count_errors(&p, "S001"), 1, "one S001");
   /* recovery should get us to 'good' */
   int found_good = 0;
   for (int i = 0; i < prog.fn_count; i++)
@@ -661,6 +675,34 @@ static void test_error_recovers_second_fn(void)
       found_good = 1;
   }
   ASSERT(found_good, "recovered and parsed second fn");
+  parser_free(&p);
+}
+
+static void test_error_recovers_second_decl_after_extern(void)
+{
+  Parser p;
+  Program prog = parse("extern var stderr: ptr\n"
+                       "fn good() { return; }\n",
+                       &p);
+  ASSERT_EQ_INT(p.error_count, 1, "one parse error");
+  ASSERT_EQ_INT(count_errors(&p, "S001"), 1, "one S001");
+  ASSERT_EQ_INT(prog.extern_count, 0, "bad extern was skipped");
+  ASSERT_EQ_INT(prog.fn_count, 1, "recovered second declaration");
+  ASSERT(memcmp(prog.fns[0].name, "good", 4) == 0, "parsed good fn");
+  parser_free(&p);
+}
+
+static void test_error_recovers_second_decl_after_extern_fn(void)
+{
+  Parser p;
+  Program prog = parse("extern fn log(x: i32\n"
+                       "fn good() { return; }\n",
+                       &p);
+  ASSERT_EQ_INT(p.error_count, 1, "one parse error");
+  ASSERT_EQ_INT(count_errors(&p, "S001"), 1, "one S001");
+  ASSERT_EQ_INT(prog.extern_count, 0, "bad extern fn was skipped");
+  ASSERT_EQ_INT(prog.fn_count, 1, "recovered second declaration");
+  ASSERT(memcmp(prog.fns[0].name, "good", 4) == 0, "parsed good fn");
   parser_free(&p);
 }
 
@@ -776,6 +818,10 @@ int main(void)
   run_test("error_on_top_level_non_fn", test_error_on_top_level_non_fn);
   run_test("error_missing_brace", test_error_missing_brace);
   run_test("error_recovers_second_fn", test_error_recovers_second_fn);
+  run_test("error_recovers_second_decl_after_extern",
+           test_error_recovers_second_decl_after_extern);
+  run_test("error_recovers_second_decl_after_extern_fn",
+           test_error_recovers_second_decl_after_extern_fn);
   run_test("empty_input", test_empty_input);
 
   /* integration */
