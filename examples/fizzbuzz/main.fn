@@ -1,0 +1,24 @@
+fn main()
+{
+  // This isn't traditional fizzbuzz as we aren't using Arrays.
+  let n: i32 = core_io::input("n: ") as i32;
+  
+  if (n % 3 == 0) && (n % 5 == 0)
+  {
+    core_io::println("Fizzbuzz");
+  }
+  
+  else if n % 3 == 0
+  {
+    core_io::println("Fizz");
+  }
+
+  else if n % 5 == 0
+  {
+    core_io::println("Buzz");
+  }
+  else 
+  {
+    core_io::println(n as str);
+  }
+}
