@@ -137,8 +137,11 @@ static void check_fn_file(const SourceFile *sf, SemaResult *res)
 
   if (prog->fn_count == 0)
   {
-    char *ctx = xsprintf("Expected a function named '%s'.%s", stem,
-                         sf->parser.error_count > 0 ? "\n  (Note: Parse errors may have prevented the function from being extracted.)" : "");
+    char *ctx = xsprintf(
+        "Expected a function named '%s'.%s", stem,
+        sf->parser.error_count > 0
+            ? "\n  (Note: Parse errors may have prevented the function from being extracted.)"
+            : "");
     push_error(res, "F001", sf->rel_path, 0, ctx,
                xsprintf("Missing primary function in '%s.fn'", stem));
     return;
@@ -148,8 +151,11 @@ static void check_fn_file(const SourceFile *sf, SemaResult *res)
 
   if (primary->name_len != slen || memcmp(primary->name, stem, (size_t) slen) != 0)
   {
-    char *ctx = xsprintf("Expected 'fn %s(...)' but found 'fn %.*s(...)'.%s", stem, primary->name_len, primary->name,
-                         sf->parser.error_count > 0 ? "\n  (Note: Parse errors may have affected function extraction.)" : "");
+    char *ctx = xsprintf("Expected 'fn %s(...)' but found 'fn %.*s(...)'.%s", stem,
+                         primary->name_len, primary->name,
+                         sf->parser.error_count > 0
+                             ? "\n  (Note: Parse errors may have affected function extraction.)"
+                             : "");
     push_error(res, "F003", sf->rel_path, primary->line, ctx,
                xsprintf("Function name mismatch in '%s.fn'", stem));
     return;
@@ -263,7 +269,6 @@ static int concept_has_parse_errors(const Project *proj, int concept_idx)
       return 1;
   return 0;
 }
-
 
 /* Export set for a concept: .fn stems that actually declare the matching function */
 typedef struct
@@ -382,7 +387,9 @@ static void check_qual_call(const Expr *expr, int concept_idx, const char *rel_p
     {
       char *ctx = xsprintf("'%.*s' is defined in %s and is not visible outside concept '%.*s'.%s",
                            fn_len, fn_name, impl_file, tgt_len, tgt_name,
-                           concept_has_parse_errors(proj, tgt_idx) ? "\n  (Note: Parse errors in the concept may be related.)" : "");
+                           concept_has_parse_errors(proj, tgt_idx)
+                               ? "\n  (Note: Parse errors in the concept may be related.)"
+                               : "");
       push_error(res, "I004", rel_path, line, ctx,
                  xsprintf("Cannot access internal function '%.*s'", fn_len, fn_name));
     }
@@ -415,10 +422,13 @@ static void check_qual_call(const Expr *expr, int concept_idx, const char *rel_p
         buf = xstrdup("(none)");
       }
 
-      char *ctx = xsprintf("'%.*s' is not exported by concept '%.*s'.\n"
-                           "  Exported functions: %s%s",
-                           fn_len, fn_name, tgt_len, tgt_name, buf,
-                           concept_has_parse_errors(proj, tgt_idx) ? "\n  (Note: Parse errors in the concept may have prevented extraction.)" : "");
+      char *ctx =
+          xsprintf("'%.*s' is not exported by concept '%.*s'.\n"
+                   "  Exported functions: %s%s",
+                   fn_len, fn_name, tgt_len, tgt_name, buf,
+                   concept_has_parse_errors(proj, tgt_idx)
+                       ? "\n  (Note: Parse errors in the concept may have prevented extraction.)"
+                       : "");
       push_error(res, "I003", rel_path, line, ctx,
                  xsprintf("Unknown function '%.*s::%.*s'", tgt_len, tgt_name, fn_len, fn_name));
       free(buf);
@@ -917,13 +927,15 @@ static TypeKind infer_expr(const Expr *e, const FnDecl *fn, Scope *scope, const 
           symtable_lookup_local_var(symt, concept_idx, e->as.ident.ptr, e->as.ident.len);
       if (gv)
         return gv->type;
-      
-      char *ctx = xsprintf("'%.*s' is not defined in this concept.%s", e->as.ident.len, e->as.ident.ptr,
-                           concept_has_parse_errors(symt->proj, concept_idx) ? "\n  (Note: Parse errors in this concept may be the cause.)" : "");
-      push_error(
-          res, "I005", rel_path, e->line, ctx,
-          xsprintf("Unknown identifier '%.*s'", e->as.ident.len, e->as.ident.ptr));
-      
+
+      char *ctx =
+          xsprintf("'%.*s' is not defined in this concept.%s", e->as.ident.len, e->as.ident.ptr,
+                   concept_has_parse_errors(symt->proj, concept_idx)
+                       ? "\n  (Note: Parse errors in this concept may be the cause.)"
+                       : "");
+      push_error(res, "I005", rel_path, e->line, ctx,
+                 xsprintf("Unknown identifier '%.*s'", e->as.ident.len, e->as.ident.ptr));
+
       return TYPE_UNKNOWN;
     }
 
@@ -1125,8 +1137,11 @@ static TypeKind infer_expr(const Expr *e, const FnDecl *fn, Scope *scope, const 
           symtable_lookup_local_fn(symt, concept_idx, e->as.call.name, e->as.call.name_len);
       if (!sym)
       {
-        char *ctx = xsprintf("'%.*s' is not defined in this concept.%s", e->as.call.name_len, e->as.call.name,
-                             concept_has_parse_errors(symt->proj, concept_idx) ? "\n  (Note: Parse errors in this concept may be the cause.)" : "");
+        char *ctx = xsprintf("'%.*s' is not defined in this concept.%s", e->as.call.name_len,
+                             e->as.call.name,
+                             concept_has_parse_errors(symt->proj, concept_idx)
+                                 ? "\n  (Note: Parse errors in this concept may be the cause.)"
+                                 : "");
         push_error(res, "I005", rel_path, e->line, ctx,
                    xsprintf("Unknown function '%.*s'", e->as.call.name_len, e->as.call.name));
         return TYPE_UNKNOWN;
