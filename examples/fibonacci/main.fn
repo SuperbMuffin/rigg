@@ -1,0 +1,18 @@
+fn main()
+{
+  let mut a: i32 = 0;
+  let mut b: i32 = 1;
+  
+  let mut tmp: i32 = 0;
+  
+  let n: i32 = core_io::input("n: ") as i32;
+  for (let mut i: i32 = 0; i < n; i++)
+  {
+    tmp = b;
+    b = a + b;
+    a = tmp;
+    core_io::println(a as str);
+  }
+
+
+}
