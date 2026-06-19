@@ -329,8 +329,7 @@ static Expr *parse_primary(Parser *p)
     return e;
   }
 
-  report_s001(p, line, "expected expression but got '%.*s'", p->current.len,
-              p->current.start);
+  report_s001(p, line, "expected expression but got '%.*s'", p->current.len, p->current.start);
   return NULL;
 }
 
