@@ -1,3 +1,7 @@
+/*
+ * SPDX-License-Identifier: MPL-2.0
+ */
+
 #ifndef PARSER_H
 #define PARSER_H
 

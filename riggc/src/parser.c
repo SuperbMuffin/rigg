@@ -1,3 +1,7 @@
+/*
+ * SPDX-License-Identifier: MPL-2.0
+ */
+
 #include "parser.h"
 #include <stdarg.h>
 #include <stdio.h>

@@ -1,3 +1,7 @@
+/*
+ * SPDX-License-Identifier: MPL-2.0
+ */
+
 #include "sema.h"
 #include "diag.h"
 #include "parser.h"

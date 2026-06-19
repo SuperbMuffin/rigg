@@ -14,3 +14,6 @@ The filesystem defines your public API. The project graph defines your dependenc
 
 ---
 
+---
+> [!IMPORTANT]
+>Code under this subdirectory is licensed under the `MPL-2.0` License. See [LICENSE](LICENSE) for more details.

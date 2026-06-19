@@ -1,3 +1,7 @@
+/*
+ * SPDX-License-Identifier: MPL-2.0
+ */
+
 #ifndef PROJECT_H
 #define PROJECT_H
 

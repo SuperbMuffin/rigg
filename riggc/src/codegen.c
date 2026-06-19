@@ -1,3 +1,7 @@
+/*
+ * SPDX-License-Identifier: MPL-2.0
+ */
+
 #include "codegen.h"
 #include "parser.h"
 #include "project.h"

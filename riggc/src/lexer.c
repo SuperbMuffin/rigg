@@ -1,3 +1,7 @@
+/*
+ * SPDX-License-Identifier: MPL-2.0
+ */
+
 #include "lexer.h"
 #include <ctype.h>
 #include <string.h>

@@ -1,3 +1,7 @@
+/*
+ * SPDX-License-Identifier: MPL-2.0
+ */
+
 #ifndef DIAG_H
 #define DIAG_H
 

@@ -1,3 +1,7 @@
+/*
+ * SPDX-License-Identifier: MPL-2.0
+ */
+
 #ifndef TOKEN_H
 #define TOKEN_H
 

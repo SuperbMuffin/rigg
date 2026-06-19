@@ -1,3 +1,7 @@
+/*
+ * SPDX-License-Identifier: MPL-2.0
+ */
+
 #ifndef CODEGEN_H
 #define CODEGEN_H
 
