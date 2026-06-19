@@ -1,0 +1,32 @@
+// externs for now, maybe a core_rand lib in future?
+extern fn rand() -> i32;
+extern fn srand(seed: i32);
+extern fn time(t: i32) -> i32;
+
+
+fn main()
+{
+  srand(time(0));
+
+  let target: i32 = rand() % 100;
+  let mut guess: i32 = core_io::input("guess: ") as i32;
+  while true
+  {
+    if (guess==target)
+    {
+      core_io::println("You got it!");
+      break;
+    }
+    else if (guess>target)
+    {
+      core_io::println("Lower");
+    }
+    else
+    {
+      core_io::println("Higher");
+    }
+    
+    guess = core_io::input("guess: ") as i32;
+  }
+
+}
