@@ -498,6 +498,37 @@ static void test_t005_immutable_reassign(void)
   teardown(&proj, &res);
 }
 
+static void test_t005_for_post_increment_immutable(void)
+{
+  Project proj;
+  SemaResult res;
+  ASSERT(load("t005_for_post_increment_immutable", &proj, &res) == 0, "project_load succeeded");
+  assert_error(&res, "T005");
+  teardown(&proj, &res);
+}
+
+static void test_t001_for_post_increment_type(void)
+{
+  Project proj;
+  SemaResult res;
+  ASSERT(load("t001_for_post_increment_type", &proj, &res) == 0, "project_load succeeded");
+  assert_error(&res, "T001");
+  teardown(&proj, &res);
+}
+
+static void test_ok_for_loop(void)
+{
+  Project proj;
+  SemaResult res;
+  ASSERT(load("ok_for_loop", &proj, &res) == 0, "project_load succeeded");
+  if (res.count > 0)
+  {
+    sema_print(&res);
+    ASSERT(res.count == 0, "no spurious errors in for loop fixture");
+  }
+  teardown(&proj, &res);
+}
+
 /* -------------------------------------------------------------------------
  * error count / no unexpected errors
  * ---------------------------------------------------------------------- */
@@ -694,9 +725,12 @@ int main(void)
   run_test("t003_missing_return", test_t003_missing_return);
   run_test("t004_return_in_void", test_t004_return_in_void);
   run_test("t005_immutable_reassign", test_t005_immutable_reassign);
+  run_test("t005_for_post_increment_immutable", test_t005_for_post_increment_immutable);
+  run_test("t001_for_post_increment_type", test_t001_for_post_increment_type);
 
   /* regression */
   run_test("ok_no_spurious_errors", test_ok_no_spurious_errors);
+  run_test("ok_for_loop", test_ok_for_loop);
   run_test("sema_print_formats_errors", test_sema_print_formats_errors);
 
   run_test("t001_call_return_type", test_t001_call_return_type);

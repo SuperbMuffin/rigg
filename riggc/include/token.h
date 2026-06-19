@@ -14,6 +14,7 @@ typedef enum
   TOK_RETURN,
   TOK_IF,
   TOK_ELSE,
+  TOK_FOR,
   TOK_WHILE,
   TOK_LOOP,
   TOK_BREAK,
@@ -54,7 +55,9 @@ typedef enum
   TOK_COLON_COLON, // ::
 
   TOK_PLUS,     // +
+  TOK_PLUS_PLUS, // ++
   TOK_MINUS,    // -
+  TOK_MINUS_MINUS, // --
   TOK_STAR,     // *
   TOK_SLASH,    // /
   TOK_PERCENT,  // %

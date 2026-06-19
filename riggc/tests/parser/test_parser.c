@@ -412,6 +412,18 @@ static void test_assign_expr_rhs(void)
   parser_free(&p);
 }
 
+static void test_update_expr(void)
+{
+  Parser p;
+  Program prog = parse("fn f() { x++; }", &p);
+  assert_ok(&p);
+  Expr *e = prog.fns[0].body.stmts[0]->as.sexpr.expr;
+  ASSERT(e->kind == EXPR_UPDATE, "is update");
+  ASSERT(e->as.update.op == TOK_PLUS_PLUS, "op is ++");
+  ASSERT(e->as.update.target->kind == EXPR_IDENT, "target is ident");
+  parser_free(&p);
+}
+
 static void test_ptr_index_read(void)
 {
   Parser p;
@@ -575,6 +587,22 @@ static void test_continue(void)
   parser_free(&p);
 }
 
+static void test_for(void)
+{
+  Parser p;
+  Program prog = parse("fn f() { for (let mut i: i32 = 0; i < n; i++) { break; } }", &p);
+  assert_ok(&p);
+  Stmt *s = prog.fns[0].body.stmts[0];
+  ASSERT(s->kind == STMT_FOR, "is for");
+  ASSERT(s->as.sfor.init->kind == STMT_LET, "init is let");
+  ASSERT(s->as.sfor.cond->kind == EXPR_BINARY, "cond is binary");
+  ASSERT(s->as.sfor.post->kind == EXPR_UPDATE, "post is update");
+  ASSERT(s->as.sfor.post->as.update.op == TOK_PLUS_PLUS, "post op is ++");
+  ASSERT(s->as.sfor.body.count == 1, "body has one stmt");
+  ASSERT(s->as.sfor.body.stmts[0]->kind == STMT_BREAK, "body contains break");
+  parser_free(&p);
+}
+
 /* -------------------------------------------------------------------------
  * line numbers on nodes
  * ---------------------------------------------------------------------- */
@@ -721,6 +749,7 @@ int main(void)
   /* assignment */
   run_test("assign", test_assign);
   run_test("assign_expr_rhs", test_assign_expr_rhs);
+  run_test("update_expr", test_update_expr);
   run_test("ptr_index_read", test_ptr_index_read);
   run_test("ptr_index_assign", test_ptr_index_assign);
   run_test("cast_ptr_to_str", test_cast_ptr_to_str);
@@ -735,6 +764,7 @@ int main(void)
   run_test("if_with_else", test_if_with_else);
   run_test("if_else_if", test_if_else_if);
   run_test("while", test_while);
+  run_test("for", test_for);
   run_test("loop", test_loop);
   run_test("continue", test_continue);
 

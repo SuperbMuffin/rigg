@@ -445,6 +445,9 @@ static void check_expr_imports(const Expr *expr, int concept_idx, const char *re
       check_expr_imports(expr->as.assign.target, concept_idx, rel_path, proj, res);
       check_expr_imports(expr->as.assign.value, concept_idx, rel_path, proj, res);
       break;
+    case EXPR_UPDATE:
+      check_expr_imports(expr->as.update.target, concept_idx, rel_path, proj, res);
+      break;
     case EXPR_CAST:
       check_expr_imports(expr->as.cast.expr, concept_idx, rel_path, proj, res);
       break;
@@ -476,6 +479,13 @@ static void check_block_imports(const Block *block, int concept_idx, const char 
         check_expr_imports(s->as.sif.cond, concept_idx, rel_path, proj, res);
         check_block_imports(&s->as.sif.then_block, concept_idx, rel_path, proj, res);
         check_block_imports(&s->as.sif.else_block, concept_idx, rel_path, proj, res);
+        break;
+      case STMT_FOR:
+        check_block_imports(&(Block){.stmts = (Stmt **) &s->as.sfor.init, .count = 1},
+                            concept_idx, rel_path, proj, res);
+        check_expr_imports(s->as.sfor.cond, concept_idx, rel_path, proj, res);
+        check_expr_imports(s->as.sfor.post, concept_idx, rel_path, proj, res);
+        check_block_imports(&s->as.sfor.body, concept_idx, rel_path, proj, res);
         break;
       case STMT_WHILE:
         check_expr_imports(s->as.swhile.cond, concept_idx, rel_path, proj, res);
@@ -802,6 +812,9 @@ static const FnSymbol *symtable_lookup_qual_fn(const SymTable *t, int concept_id
 
 static TypeKind infer_expr(const Expr *e, const FnDecl *fn, Scope *scope, const char *rel_path,
                            const SymTable *symt, int concept_idx, TypeKind hint, SemaResult *res);
+static TypeKind infer_update_expr(const Expr *e, const FnDecl *fn, Scope *scope,
+                                  const char *rel_path, const SymTable *symt, int concept_idx,
+                                  SemaResult *res);
 
 static void check_call_args(const ArgList *args, const FnSymbol *sym, const FnDecl *fn,
                             Scope *scope, const char *rel_path, int line, const SymTable *symt,
@@ -961,6 +974,9 @@ static TypeKind infer_expr(const Expr *e, const FnDecl *fn, Scope *scope, const 
       }
       return rhs_type;
     }
+
+    case EXPR_UPDATE:
+      return infer_update_expr(e, fn, scope, rel_path, symt, concept_idx, res);
 
     case EXPR_INDEX:
     {
@@ -1138,6 +1154,45 @@ static TypeKind infer_expr(const Expr *e, const FnDecl *fn, Scope *scope, const 
   return TYPE_UNKNOWN;
 }
 
+static TypeKind infer_update_expr(const Expr *e, const FnDecl *fn, Scope *scope,
+                                  const char *rel_path, const SymTable *symt, int concept_idx,
+                                  SemaResult *res)
+{
+  Expr *target = e->as.update.target;
+  if (!target || target->kind != EXPR_IDENT)
+  {
+    push_error(res, "T001", rel_path, e->line, xstrdup("Invalid assignment target."),
+               xstrdup("Type mismatch"));
+    return TYPE_UNKNOWN;
+  }
+
+  VarEntry *v = scope_lookup(scope, target->as.ident.ptr, target->as.ident.len);
+  if (!v)
+    return infer_expr(target, fn, scope, rel_path, symt, concept_idx, TYPE_I32, res);
+
+  if (!v->is_mut)
+  {
+    push_error(res, "T005", rel_path, e->line,
+               xsprintf("'%.*s' was declared without 'mut'.\n"
+                        "  Change to: let mut %.*s: %s = ...",
+                        target->as.ident.len, target->as.ident.ptr, target->as.ident.len,
+                        target->as.ident.ptr, type_str(v->type)),
+               xsprintf("Reassignment of immutable variable '%.*s'", target->as.ident.len,
+                        target->as.ident.ptr));
+    return v->type;
+  }
+
+  if (v->type != TYPE_I32)
+  {
+    push_error(res, "T001", rel_path, e->line,
+               xsprintf("Increment and decrement require i32, found %s.", type_str(v->type)),
+               xstrdup("Type mismatch"));
+    return TYPE_UNKNOWN;
+  }
+
+  return TYPE_I32;
+}
+
 /* Returns 1 if an expression is a boolean literal 'true' */
 static int expr_is_true_literal(const Expr *e)
 {
@@ -1174,6 +1229,10 @@ static int block_always_returns(const Block *block)
            A general while loop is not, because the condition may be false
            on the first iteration and the body never executes. */
         if (expr_is_true_literal(s->as.swhile.cond) && block_always_returns(&s->as.swhile.body))
+          return 1;
+        break;
+      case STMT_FOR:
+        if (expr_is_true_literal(s->as.sfor.cond) && block_always_returns(&s->as.sfor.body))
           return 1;
         break;
       default:
@@ -1266,6 +1325,25 @@ static void check_stmt_types(const Stmt *s, const FnDecl *fn, Scope *scope, cons
       check_block_types(&s->as.sif.else_block, fn, scope, rel_path, symt, concept_idx, loop_depth,
                         res);
       break;
+
+    case STMT_FOR:
+    {
+      int saved = scope->count;
+      check_stmt_types(s->as.sfor.init, fn, scope, rel_path, symt, concept_idx, loop_depth, res);
+      TypeKind cond =
+          infer_expr(s->as.sfor.cond, fn, scope, rel_path, symt, concept_idx, TYPE_UNKNOWN, res);
+      if (cond != TYPE_UNKNOWN && cond != TYPE_BOOL)
+      {
+        push_error(res, "T001", rel_path, s->line,
+                   xsprintf("For condition must be bool, found %s.", type_str(cond)),
+                   xstrdup("Type mismatch"));
+      }
+      infer_expr(s->as.sfor.post, fn, scope, rel_path, symt, concept_idx, TYPE_UNKNOWN, res);
+      check_block_types(&s->as.sfor.body, fn, scope, rel_path, symt, concept_idx, loop_depth + 1,
+                        res);
+      scope->count = saved;
+      break;
+    }
 
     case STMT_WHILE:
     {

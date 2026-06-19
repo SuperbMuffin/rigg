@@ -78,6 +78,7 @@ static TokenKind keyword_or_ident(const char *start, int len)
   KW("return", TOK_RETURN)
   KW("if", TOK_IF)
   KW("else", TOK_ELSE)
+  KW("for", TOK_FOR)
   KW("while", TOK_WHILE)
   KW("loop", TOK_LOOP)
   KW("break", TOK_BREAK)
@@ -187,7 +188,13 @@ Token lexer_next(Lexer *l)
       t.kind = TOK_SEMI;
       break;
     case '+':
-      t.kind = TOK_PLUS;
+      if (peek(l) == '+')
+      {
+        advance(l);
+        t.kind = TOK_PLUS_PLUS;
+      }
+      else
+        t.kind = TOK_PLUS;
       break;
     case '*':
       t.kind = TOK_STAR;
@@ -208,7 +215,12 @@ Token lexer_next(Lexer *l)
         t.kind = TOK_COLON;
       break;
     case '-':
-      if (peek(l) == '>')
+      if (peek(l) == '-')
+      {
+        advance(l);
+        t.kind = TOK_MINUS_MINUS;
+      }
+      else if (peek(l) == '>')
       {
         advance(l);
         t.kind = TOK_ARROW;

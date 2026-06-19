@@ -134,8 +134,8 @@ typedef struct
 /* Loop frame for break/continue */
 typedef struct
 {
-  int header_label; /* continue target */
-  int exit_label;   /* break target */
+  int continue_label; /* continue target */
+  int exit_label;     /* break target */
 } LoopFrame;
 
 #define MAX_LOOPS 64
@@ -505,6 +505,8 @@ static TypeKind infer_type(CG *cg, const Expr *e)
     }
     case EXPR_ASSIGN:
       return infer_type(cg, e->as.assign.value);
+    case EXPR_UPDATE:
+      return infer_type(cg, e->as.update.target);
     case EXPR_INDEX:
       return TYPE_I32;
     case EXPR_UNARY:
@@ -713,6 +715,24 @@ static int emit_expr(CG *cg, const Expr *e, TypeKind hint)
         return val;
       }
       return 0;
+    }
+
+    case EXPR_UPDATE:
+    {
+      Expr *target = e->as.update.target;
+      if (target->kind != EXPR_IDENT)
+        return 0;
+      const Local *l = find_local(cg, target->as.ident.ptr, target->as.ident.len);
+      if (!l)
+        return 0;
+      int cur = emit_expr(cg, target, TYPE_I32);
+      int next = new_reg(cg);
+      if (e->as.update.op == TOK_PLUS_PLUS)
+        emit(cg, "  %%%d = add i32 %%%d, 1\n", next, cur);
+      else
+        emit(cg, "  %%%d = sub i32 %%%d, 1\n", next, cur);
+      emit(cg, "  store i32 %%%d, ptr %%%d\n", next, l->reg);
+      return next;
     }
 
     case EXPR_INDEX:
@@ -1058,6 +1078,38 @@ static void emit_stmt(CG *cg, const Stmt *s, const FnDecl *fn)
       break;
     }
 
+    case STMT_FOR:
+    {
+      int header_label = new_label(cg);
+      int body_label = new_label(cg);
+      int post_label = new_label(cg);
+      int exit_label = new_label(cg);
+
+      int saved = save_locals(cg);
+      emit_stmt(cg, s->as.sfor.init, fn);
+      emit(cg, "  br label %%L%d\n", header_label);
+
+      emit(cg, "L%d:\n", header_label);
+      int cond = emit_expr(cg, s->as.sfor.cond, TYPE_BOOL);
+      emit(cg, "  br i1 %%%d, label %%L%d, label %%L%d\n", cond, body_label, exit_label);
+
+      emit(cg, "L%d:\n", body_label);
+      cg->loop_stack[cg->loop_depth++] = (LoopFrame){post_label, exit_label};
+      int body_saved = save_locals(cg);
+      emit_block(cg, &s->as.sfor.body, fn);
+      restore_locals(cg, body_saved);
+      cg->loop_depth--;
+      emit(cg, "  br label %%L%d\n", post_label);
+
+      emit(cg, "L%d:\n", post_label);
+      emit_expr(cg, s->as.sfor.post, TYPE_UNKNOWN);
+      emit(cg, "  br label %%L%d\n", header_label);
+
+      restore_locals(cg, saved);
+      emit(cg, "L%d:\n", exit_label);
+      break;
+    }
+
     case STMT_WHILE:
     {
       int header_label = new_label(cg);
@@ -1111,8 +1163,8 @@ static void emit_stmt(CG *cg, const Stmt *s, const FnDecl *fn)
 
     case STMT_CONTINUE:
     {
-      int header = cg->loop_stack[cg->loop_depth - 1].header_label;
-      emit(cg, "  br label %%L%d\n", header);
+      int cont = cg->loop_stack[cg->loop_depth - 1].continue_label;
+      emit(cg, "  br label %%L%d\n", cont);
       emit(cg, "L%d:\n", new_label(cg));
       break;
     }
@@ -1261,6 +1313,9 @@ static void collect_decls_expr(const Expr *e, const Project *proj, int concept_i
       collect_decls_expr(e->as.assign.target, proj, concept_idx, decls, count, cap);
       collect_decls_expr(e->as.assign.value, proj, concept_idx, decls, count, cap);
       break;
+    case EXPR_UPDATE:
+      collect_decls_expr(e->as.update.target, proj, concept_idx, decls, count, cap);
+      break;
     case EXPR_INDEX:
       collect_decls_expr(e->as.index.target, proj, concept_idx, decls, count, cap);
       collect_decls_expr(e->as.index.index, proj, concept_idx, decls, count, cap);
@@ -1299,6 +1354,12 @@ static void collect_decls_stmt(const Stmt *s, const Project *proj, int concept_i
       collect_decls_expr(s->as.sif.cond, proj, concept_idx, decls, count, cap);
       collect_decls_block(&s->as.sif.then_block, proj, concept_idx, decls, count, cap);
       collect_decls_block(&s->as.sif.else_block, proj, concept_idx, decls, count, cap);
+      break;
+    case STMT_FOR:
+      collect_decls_stmt(s->as.sfor.init, proj, concept_idx, decls, count, cap);
+      collect_decls_expr(s->as.sfor.cond, proj, concept_idx, decls, count, cap);
+      collect_decls_expr(s->as.sfor.post, proj, concept_idx, decls, count, cap);
+      collect_decls_block(&s->as.sfor.body, proj, concept_idx, decls, count, cap);
       break;
     case STMT_WHILE:
       collect_decls_expr(s->as.swhile.cond, proj, concept_idx, decls, count, cap);

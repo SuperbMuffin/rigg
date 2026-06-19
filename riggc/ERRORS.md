@@ -192,7 +192,7 @@ Error S001: Unexpected token '}'
 
 ### S004 — Break or continue outside loop
 
-`break` or `continue` appears outside a `while` or `loop` block.
+`break` or `continue` appears outside a `while`, `for`, or `loop` block.
 
 ```
 Error S004: 'break' used outside of a loop

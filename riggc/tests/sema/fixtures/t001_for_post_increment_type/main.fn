@@ -1,0 +1,5 @@
+fn main() {
+    let mut flag: bool = true;
+    for (let mut j: i32 = 0; j < 4; flag++) {
+    }
+}

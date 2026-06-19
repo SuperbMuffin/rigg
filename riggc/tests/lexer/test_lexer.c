@@ -37,7 +37,7 @@ static void assert_eof(Lexer *l)
 
 static void test_keywords(void)
 {
-  const char *src = "fn let mut const return if else while loop break continue true false";
+  const char *src = "fn let mut const return if else for while loop break continue true false";
   Lexer l;
   lexer_init(&l, src);
   assert_tok(&l, TOK_FN, "fn");
@@ -47,12 +47,25 @@ static void test_keywords(void)
   assert_tok(&l, TOK_RETURN, "return");
   assert_tok(&l, TOK_IF, "if");
   assert_tok(&l, TOK_ELSE, "else");
+  assert_tok(&l, TOK_FOR, "for");
   assert_tok(&l, TOK_WHILE, "while");
   assert_tok(&l, TOK_LOOP, "loop");
   assert_tok(&l, TOK_BREAK, "break");
   assert_tok(&l, TOK_CONTINUE, "continue");
   assert_tok(&l, TOK_TRUE, "true");
   assert_tok(&l, TOK_FALSE, "false");
+  assert_eof(&l);
+}
+
+static void test_update_ops(void)
+{
+  const char *src = "++ -- + -";
+  Lexer l;
+  lexer_init(&l, src);
+  assert_tok(&l, TOK_PLUS_PLUS, "++");
+  assert_tok(&l, TOK_MINUS_MINUS, "--");
+  assert_tok(&l, TOK_PLUS, "+");
+  assert_tok(&l, TOK_MINUS, "-");
   assert_eof(&l);
 }
 
@@ -431,6 +444,7 @@ static void test_empty_input(void)
 int main(void)
 {
   run_test("keywords", test_keywords);
+  run_test("update_ops", test_update_ops);
   run_test("types", test_types);
   run_test("ident_simple", test_ident_simple);
   run_test("ident_snake_case", test_ident_snake_case);

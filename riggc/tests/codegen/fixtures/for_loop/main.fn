@@ -1,0 +1,10 @@
+fn main() -> i32 {
+    let mut sum: i32 = 0;
+    for (let mut i: i32 = 0; i < 4; i++) {
+        if i == 2 {
+            continue;
+        }
+        sum = sum + i;
+    }
+    return sum;
+}

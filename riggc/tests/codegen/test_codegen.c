@@ -157,6 +157,15 @@ static void test_while_loop(void)
   assert_ir_contains("while_loop", "main", "icmp slt");
 }
 
+static void test_for_loop(void)
+{
+  ASSERT(emit("for_loop") == 0, "emit succeeded");
+  assert_ir_contains("for_loop", "main", "br i1");
+  assert_ir_contains("for_loop", "main", "icmp slt");
+  assert_ir_contains("for_loop", "main", "add i32");
+  assert_ir_contains("for_loop", "main", "store i32");
+}
+
 static void test_loop_break(void)
 {
   ASSERT(emit("loop_break") == 0, "emit succeeded");
@@ -277,6 +286,7 @@ int main(void)
   run_test("arithmetic", test_arithmetic);
   run_test("if_else", test_if_else);
   run_test("while_loop", test_while_loop);
+  run_test("for_loop", test_for_loop);
   run_test("loop_break", test_loop_break);
   run_test("qual_call", test_qual_call);
   run_test("float_ops", test_float_ops);

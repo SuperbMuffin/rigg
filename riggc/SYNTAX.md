@@ -244,6 +244,18 @@ while condition
 }
 ```
 
+### For
+
+```
+for (let mut i: i32 = 0; i < n; i++)
+{
+    ...
+}
+```
+
+The init clause is a `let` declaration, the condition is a boolean
+expression, and the post clause is an assignment or `i++` / `i--`.
+
 ### Loop
 
 ```
@@ -263,7 +275,7 @@ break;
 continue;
 ```
 
-Valid only inside `while` or `loop` blocks.
+Valid only inside `while`, `for`, or `loop` blocks.
 
 ---
 

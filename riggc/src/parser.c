@@ -106,6 +106,7 @@ static void synchronise(Parser *p, int in_block)
     case TOK_CONST:
     case TOK_RETURN:
     case TOK_IF:
+    case TOK_FOR:
     case TOK_WHILE:
     case TOK_LOOP:
     case TOK_RBRACE:
@@ -352,6 +353,15 @@ static Expr *parse_postfix(Parser *p)
       expect(p, TOK_RBRACKET, "']'");
       e = idx;
     }
+    else if (match(p, TOK_PLUS_PLUS) || match(p, TOK_MINUS_MINUS))
+    {
+      int line = p->previous.line;
+      Expr *upd = make_expr(p, EXPR_UPDATE, line);
+      upd->as.update.target = e;
+      upd->as.update.op = p->previous.kind;
+      e = upd;
+      break;
+    }
     else
       break;
   }
@@ -556,6 +566,21 @@ static Stmt *parse_while(Parser *p)
   return s;
 }
 
+static Stmt *parse_for(Parser *p)
+{
+  int line = p->current.line;
+  expect(p, TOK_FOR, "'for'");
+  Stmt *s = make_stmt(p, STMT_FOR, line);
+  expect(p, TOK_LPAREN, "'('");
+  s->as.sfor.init = parse_let(p);
+  s->as.sfor.cond = parse_expr(p);
+  expect(p, TOK_SEMI, "';'");
+  s->as.sfor.post = parse_expr(p);
+  expect(p, TOK_RPAREN, "')'");
+  s->as.sfor.body = parse_block(p);
+  return s;
+}
+
 static Stmt *parse_loop(Parser *p)
 {
   int line = p->current.line;
@@ -578,6 +603,8 @@ static Stmt *parse_stmt(Parser *p)
       return parse_return(p);
     case TOK_IF:
       return parse_if(p);
+    case TOK_FOR:
+      return parse_for(p);
     case TOK_WHILE:
       return parse_while(p);
     case TOK_LOOP:
@@ -896,8 +923,12 @@ static const char *op_name(TokenKind k)
   {
     case TOK_PLUS:
       return "+";
+    case TOK_PLUS_PLUS:
+      return "++";
     case TOK_MINUS:
       return "-";
+    case TOK_MINUS_MINUS:
+      return "--";
     case TOK_STAR:
       return "*";
     case TOK_SLASH:
@@ -989,6 +1020,10 @@ static void dump_expr(const Expr *e, int depth)
       dump_expr(e->as.assign.target, depth + 1);
       dump_expr(e->as.assign.value, depth + 1);
       break;
+    case EXPR_UPDATE:
+      printf("Update %s\n", op_name(e->as.update.op));
+      dump_expr(e->as.update.target, depth + 1);
+      break;
     case EXPR_CAST:
       printf("Cast %s\n", type_name(e->as.cast.target_type));
       dump_expr(e->as.cast.expr, depth + 1);
@@ -1034,6 +1069,21 @@ static void dump_stmt(const Stmt *s, int depth)
         printf("Else\n");
         dump_block(&s->as.sif.else_block, depth + 2);
       }
+      break;
+    case STMT_FOR:
+      printf("For\n");
+      do_indent(depth + 1);
+      printf("Init\n");
+      dump_stmt(s->as.sfor.init, depth + 2);
+      do_indent(depth + 1);
+      printf("Cond\n");
+      dump_expr(s->as.sfor.cond, depth + 2);
+      do_indent(depth + 1);
+      printf("Post\n");
+      dump_expr(s->as.sfor.post, depth + 2);
+      do_indent(depth + 1);
+      printf("Body\n");
+      dump_block(&s->as.sfor.body, depth + 2);
       break;
     case STMT_WHILE:
       printf("While\n");

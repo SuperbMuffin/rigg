@@ -1,0 +1,5 @@
+fn main() {
+    let i: i32 = 0;
+    for (let mut j: i32 = 0; j < 4; i++) {
+    }
+}

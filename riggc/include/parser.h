@@ -41,6 +41,7 @@ typedef enum
   EXPR_BINARY,
   EXPR_INDEX,
   EXPR_ASSIGN,
+  EXPR_UPDATE,
   EXPR_CAST,
 } ExprKind;
 
@@ -108,6 +109,11 @@ struct Expr
     } assign;
     struct
     {
+      Expr *target;
+      TokenKind op;
+    } update;
+    struct
+    {
       Expr *expr;
       TypeKind target_type;
     } cast;
@@ -120,6 +126,7 @@ typedef enum
   STMT_CONST,
   STMT_RETURN,
   STMT_IF,
+  STMT_FOR,
   STMT_WHILE,
   STMT_LOOP,
   STMT_BREAK,
@@ -166,6 +173,13 @@ struct Stmt
       Block then_block;
       Block else_block;
     } sif;
+    struct
+    {
+      Stmt *init;
+      Expr *cond;
+      Expr *post;
+      Block body;
+    } sfor;
     struct
     {
       Expr *cond;
