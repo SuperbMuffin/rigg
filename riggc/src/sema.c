@@ -481,8 +481,8 @@ static void check_block_imports(const Block *block, int concept_idx, const char 
         check_block_imports(&s->as.sif.else_block, concept_idx, rel_path, proj, res);
         break;
       case STMT_FOR:
-        check_block_imports(&(Block){.stmts = (Stmt **) &s->as.sfor.init, .count = 1},
-                            concept_idx, rel_path, proj, res);
+        check_block_imports(&(Block){.stmts = (Stmt **) &s->as.sfor.init, .count = 1}, concept_idx,
+                            rel_path, proj, res);
         check_expr_imports(s->as.sfor.cond, concept_idx, rel_path, proj, res);
         check_expr_imports(s->as.sfor.post, concept_idx, rel_path, proj, res);
         check_block_imports(&s->as.sfor.body, concept_idx, rel_path, proj, res);

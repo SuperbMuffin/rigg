@@ -54,26 +54,26 @@ typedef enum
   TOK_COLON,       // :
   TOK_COLON_COLON, // ::
 
-  TOK_PLUS,     // +
-  TOK_PLUS_PLUS, // ++
-  TOK_MINUS,    // -
+  TOK_PLUS,        // +
+  TOK_PLUS_PLUS,   // ++
+  TOK_MINUS,       // -
   TOK_MINUS_MINUS, // --
-  TOK_STAR,     // *
-  TOK_SLASH,    // /
-  TOK_PERCENT,  // %
-  TOK_EQ,       // ==
-  TOK_NEQ,      // !=
-  TOK_LT,       // <
-  TOK_GT,       // >
-  TOK_LTE,      // <=
-  TOK_GTE,      // >=
-  TOK_AND,      // &&
-  TOK_OR,       // ||
-  TOK_BANG,     // !
-  TOK_ASSIGN,   // =
-  TOK_ARROW,    // ->
-  TOK_ELLIPSIS, // ...
-  TOK_AS,       // as
+  TOK_STAR,        // *
+  TOK_SLASH,       // /
+  TOK_PERCENT,     // %
+  TOK_EQ,          // ==
+  TOK_NEQ,         // !=
+  TOK_LT,          // <
+  TOK_GT,          // >
+  TOK_LTE,         // <=
+  TOK_GTE,         // >=
+  TOK_AND,         // &&
+  TOK_OR,          // ||
+  TOK_BANG,        // !
+  TOK_ASSIGN,      // =
+  TOK_ARROW,       // ->
+  TOK_ELLIPSIS,    // ...
+  TOK_AS,          // as
 
   TOK_EOF,
   TOK_ERROR,
