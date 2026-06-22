@@ -1,7 +1,3 @@
-# ==========================================
-# Rigg Language Build Artifacts
-# ==========================================
-
 # Catch any directory named 'build' or 'target' anywhere in the project
 **/build/
 **/target/
@@ -19,6 +15,8 @@ riggc.exe
 *.o
 *.obj
 
+# extra stuff
+**/compile_commands.json
 
 # OS specific junk
 .DS_Store
