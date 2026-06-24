@@ -1,7 +1,5 @@
 fn main()
 {
-  // since these are i32's, we don't support decimal math.
-
   let a: str = core_io::input("First Num: ");
   let op: str = core_io::input("Operation: ");
   let b: str = core_io::input("Second Num: ");
