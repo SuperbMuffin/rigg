@@ -8,28 +8,28 @@ fn main()
 
   if (op == "+")
   {
-    let result: str = ((a as i32) + (b as i32)) as str;
+    let result: str = ((a as f32) + (b as f32)) as str;
     let msg: str = core_str::concat("Result: ", result);
     core_io::println(msg);
   }
   
   else if (op == "-")
   {
-    let result: str = ((a as i32) - (b as i32)) as str;
+    let result: str = ((a as f32) - (b as f32)) as str;
     let msg: str = core_str::concat("Result: ", result);
     core_io::println(msg);
   }
 
   else if (op == "*")
   {
-    let result: str = ((a as i32) * (b as i32)) as str;
+    let result: str = ((a as f32) * (b as f32)) as str;
     let msg: str = core_str::concat("Result: ", result);
     core_io::println(msg);
   }
 
   else if (op == "/")
   {
-    let result: str = ((a as i32) / (b as i32)) as str;
+    let result: str = ((a as f32) / (b as f32)) as str;
     let msg: str = core_str::concat("Result: ", result);
     core_io::println(msg);
   }

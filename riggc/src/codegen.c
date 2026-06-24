@@ -595,6 +595,33 @@ static int emit_cast(CG *cg, const Expr *e)
     return r;
   }
 
+  if (src == TYPE_F32 && dst == TYPE_STR)
+  {
+    int r = new_reg(cg);
+    emit(cg, "  %%%d = call ptr @rigg_f32_to_str(float %%%d)\n", r, operand);
+    return r;
+  }
+
+  if (src == TYPE_F64 && dst == TYPE_STR)
+  {
+    int r = new_reg(cg);
+    emit(cg, "  %%%d = call ptr @rigg_f64_to_str(double %%%d)\n", r, operand);
+    return r;
+  }
+
+  if (src == TYPE_STR && dst == TYPE_F64)
+  {
+    int r = new_reg(cg);
+    emit(cg, "  %%%d = call double @rigg_str_to_f64(ptr %%%d)\n", r, operand);
+    return r;
+  }
+  if (src == TYPE_STR && dst == TYPE_F32)
+  {
+    int r = new_reg(cg);
+    emit(cg, "  %%%d = call float @rigg_str_to_f32(ptr %%%d)\n", r, operand);
+    return r;
+  }
+
   if (src == TYPE_BOOL && dst == TYPE_STR)
   {
     int r = new_reg(cg);
@@ -1412,10 +1439,14 @@ static int emit_concept(const Project *proj, int concept_idx, const char *out_pa
   fprintf(f, "declare i16 @rigg_str_to_i16(ptr)\n");
   fprintf(f, "declare i32 @rigg_str_to_i32(ptr)\n");
   fprintf(f, "declare i64 @rigg_str_to_i64(ptr)\n");
+  fprintf(f, "declare float @rigg_str_to_f32(ptr)\n");
+  fprintf(f, "declare double @rigg_str_to_f64(ptr)\n");
   fprintf(f, "declare ptr @rigg_i8_to_str(i8)\n");
   fprintf(f, "declare ptr @rigg_i16_to_str(i16)\n");
   fprintf(f, "declare ptr @rigg_i32_to_str(i32)\n");
   fprintf(f, "declare ptr @rigg_i64_to_str(i64)\n");
+  fprintf(f, "declare ptr @rigg_f32_to_str(float)\n");
+  fprintf(f, "declare ptr @rigg_f64_to_str(double)\n");
   fprintf(f, "declare ptr @rigg_bool_to_str(i1)\n");
   fprintf(f, "declare i1 @rigg_str_to_bool(ptr)\n");
   fprintf(f, "declare i1 @rigg_str_eq(ptr, ptr)\n");

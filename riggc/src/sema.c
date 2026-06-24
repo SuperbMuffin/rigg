@@ -657,6 +657,15 @@ static int cast_compatible(TypeKind from, TypeKind to)
     return 1;
   if (is_signed_int(from) && to == TYPE_STR)
     return 1;
+  /* string <-> float */
+  if (from == TYPE_STR && to == TYPE_F64)
+    return 1;
+  if (from == TYPE_STR && to == TYPE_F32)
+    return 1;
+  if (from == TYPE_F32 && to == TYPE_STR)
+    return 1;
+  if (from == TYPE_F64 && to == TYPE_STR)
+    return 1;
   /* integer <-> ptr */
   if (is_signed_int(from) && to == TYPE_PTR)
     return 1;
