@@ -5,11 +5,6 @@
  * helpers
  * ---------------------------------------------------------------------- */
 
-static Token next_tok(Lexer *l)
-{
-  return lexer_next(l);
-}
-
 static void assert_tok(Lexer *l, TokenKind kind, const char *text)
 {
   Token t = lexer_next(l);
