@@ -23,6 +23,7 @@ Creates a standard project layout and fills them with sane defaults:
 ```
 main.fn
 project.meta
+project.toml
 ```
 
 ---
@@ -42,6 +43,7 @@ my_project/
     src/
         main.fn
         project.meta
+        project.toml
     README.md
 ```
 ---
