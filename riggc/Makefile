@@ -1,5 +1,7 @@
 CC            = clang
 RIGG_ROOT     = $(abspath ..)
+PREFIX       ?= /usr/local
+DESTDIR      ?=
 CFLAGS_COMMON = -Wall -Wextra -Werror -pedantic -std=c99 -g -Iinclude -MMD -MP \
              -DRIGG_RUNTIME_PATH=\"$(RIGG_ROOT)/runtime/cast.c\"
 CFLAGS_DEV    = -Og
@@ -19,10 +21,12 @@ BUILD_MODE ?= dev
 
 all: $(TARGET)
 
+build: all
+
 $(TARGET): $(OBJ)
 	@mkdir -p build
 	@echo "[LD] $@"
-	@$(CC) $(CFLAGS_COMMMON) $(CFLAGS_BUILD) $(OBJ) -o $(TARGET)
+	@$(CC) $(CFLAGS_COMMON) $(CFLAGS_BUILD) $(OBJ) -o $(TARGET)
 
 build/%.o: src/%.c
 	@mkdir -p build
@@ -41,9 +45,13 @@ run: all
 	./$(TARGET)
 
 install: all
-	cp $(TARGET) /usr/local/bin/riggc
+	@mkdir -p $(DESTDIR)$(PREFIX)/bin
+	cp $(TARGET) $(DESTDIR)$(PREFIX)/bin/riggc
+
+uninstall:
+	rm -f $(DESTDIR)$(PREFIX)/bin/riggc
 
 prod:
 	@$(MAKE) --no-print-directory BUILD_MODE=prod all
 	@echo "--- Prod Build Built ---"
-.PHONY: all clean run
+.PHONY: all build clean run install uninstall test prod

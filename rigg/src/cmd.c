@@ -10,6 +10,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#ifndef RIGG_CORE_PATH
+#define RIGG_CORE_PATH "/usr/local/share/rigg/core"
+#endif
+
 static int mkdir_p(const char *path)
 {
   char tmp[4096];
@@ -58,6 +62,26 @@ static int is_file(const char *path)
 {
   struct stat st;
   return stat(path, &st) == 0 && S_ISREG(st.st_mode);
+}
+
+static const char *core_root(void)
+{
+  const char *path = getenv("RIGG_CORE_PATH");
+  if (path && path[0])
+    return path;
+  return RIGG_CORE_PATH;
+}
+
+static int ensure_project(const char *dir)
+{
+  char toml_path[4096];
+  snprintf(toml_path, sizeof(toml_path), "%s/project.toml", dir);
+  if (!is_file(toml_path))
+  {
+    fprintf(stderr, "rigg: no project.toml found\n");
+    return -1;
+  }
+  return 0;
 }
 
 static int run_riggc(const char *dir, int check_only, const ProjectToml *toml, BuildFlags flags)
@@ -164,17 +188,69 @@ int cmd_new(const char *name)
   return 0;
 }
 
-int cmd_build(const char *dir, BuildFlags flags)
+int cmd_add(const char *dir, int argc, char **argv)
 {
-  char toml_path[4096];
-  snprintf(toml_path, sizeof(toml_path), "%s/project.toml", dir);
+  if (ensure_project(dir) < 0)
+    return 1;
 
-  /* Walk up to find project root if not in root */
-  if (!is_file(toml_path))
+  if (argc < 3)
   {
-    fprintf(stderr, "rigg: no project.toml found\n");
+    fprintf(stderr, "rigg: 'add' requires at least one library name\n");
     return 1;
   }
+
+  const char *root = core_root();
+  char src[4096];
+  char dst[4096];
+  struct stat st;
+
+  if (!is_dir(root))
+  {
+    fprintf(stderr, "rigg: core library directory '%s' not found\n", root);
+    return 1;
+  }
+
+  for (int i = 2; i < argc; i++)
+  {
+    const char *name = argv[i];
+
+    snprintf(src, sizeof(src), "%s/%s", root, name);
+    if (!is_dir(src))
+    {
+      fprintf(stderr, "rigg: core library '%s' not found in '%s'\n", name, root);
+      return 1;
+    }
+
+    snprintf(dst, sizeof(dst), "%s/%s", dir, name);
+    if (lstat(dst, &st) == 0)
+    {
+      fprintf(stderr, "rigg: '%s' already exists\n", dst);
+      return 1;
+    }
+  }
+
+  for (int i = 2; i < argc; i++)
+  {
+    const char *name = argv[i];
+
+    snprintf(src, sizeof(src), "%s/%s", root, name);
+    snprintf(dst, sizeof(dst), "%s/%s", dir, name);
+
+    if (symlink(src, dst) < 0)
+    {
+      fprintf(stderr, "rigg: cannot link '%s' to '%s': %s\n", dst, src, strerror(errno));
+      return 1;
+    }
+  }
+
+  printf("added %d core library link(s)\n", argc - 2);
+  return 0;
+}
+
+int cmd_build(const char *dir, BuildFlags flags)
+{
+  if (ensure_project(dir) < 0)
+    return 1;
 
   ProjectToml toml;
   if (toml_load(dir, &toml) < 0)
@@ -204,14 +280,8 @@ int cmd_build(const char *dir, BuildFlags flags)
 
 int cmd_run(const char *dir, BuildFlags flags)
 {
-  char toml_path[4096];
-  snprintf(toml_path, sizeof(toml_path), "%s/project.toml", dir);
-
-  if (!is_file(toml_path))
-  {
-    fprintf(stderr, "rigg: no project.toml found\n");
+  if (ensure_project(dir) < 0)
     return 1;
-  }
 
   ProjectToml toml;
   if (toml_load(dir, &toml) < 0)
@@ -236,14 +306,8 @@ int cmd_run(const char *dir, BuildFlags flags)
 
 int cmd_check(const char *dir)
 {
-  char toml_path[4096];
-  snprintf(toml_path, sizeof(toml_path), "%s/project.toml", dir);
-
-  if (!is_file(toml_path))
-  {
-    fprintf(stderr, "rigg: no project.toml found\n");
+  if (ensure_project(dir) < 0)
     return 1;
-  }
 
   ProjectToml toml;
   if (toml_load(dir, &toml) < 0)

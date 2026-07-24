@@ -76,6 +76,18 @@ Used for fast validation of syntax and type correctness.
 
 ---
 
+### `rigg add`
+Symlinks installed core libraries into the project directory.
+
+Usage:
+```
+rigg add core_io
+```
+
+By default `rigg` looks for core libraries in `/usr/local/share/rigg/core`.
+You can override that at runtime with `RIGG_CORE_PATH`.
+---
+
 ### `rigg test`
 
 Runs the project test suite.
@@ -103,4 +115,3 @@ rigg (CLI)
 * Explicit project structure
 * Deterministic builds
 * Unix-first design
-

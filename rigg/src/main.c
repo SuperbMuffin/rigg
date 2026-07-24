@@ -12,6 +12,7 @@ static void usage(void)
                   "commands:\n"
                   "  init                  initialise a new project in the current directory\n"
                   "  new <name>            create a new project directory\n"
+                  "  add <name> [...]      symlink installed core libraries into the project\n"
                   "  build [--emit-ir] [--unsafe]\n"
                   "                        compile the current project\n"
                   "  run [--emit-ir] [--unsafe]\n"
@@ -65,6 +66,9 @@ int main(int argc, char **argv)
     }
     return cmd_new(argv[2]);
   }
+
+  if (strcmp(cmd, "add") == 0)
+    return cmd_add(".", argc, argv);
 
   if (strcmp(cmd, "build") == 0)
     return cmd_build(".", parse_build_flags(argc, argv, 2));

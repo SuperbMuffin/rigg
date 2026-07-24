@@ -1,5 +1,8 @@
 CC      = clang
-CFLAGS  = -Wall -Wextra -Werror -pedantic -std=c99 -g -Iinclude -MMD -MP
+PREFIX ?= /usr/local
+DESTDIR ?=
+CORE_PATH ?= /usr/local/share/rigg/core
+CFLAGS  = -Wall -Wextra -Werror -pedantic -std=c99 -g -Iinclude -MMD -MP -DRIGG_CORE_PATH=\"$(CORE_PATH)\"
 
 SRC     = src/main.c src/cmd.c src/toml.c
 OBJ     = $(SRC:src/%.c=build/%.o)
@@ -7,6 +10,8 @@ DEP     = $(OBJ:.o=.d)
 TARGET  = build/rigg
 
 all: $(TARGET)
+
+build: all
 
 $(TARGET): $(OBJ)
 	@mkdir -p build
@@ -30,6 +35,10 @@ run: all
 	./$(TARGET)
 
 install: all
-	cp $(TARGET) /usr/local/bin/rigg
+	@mkdir -p $(DESTDIR)$(PREFIX)/bin
+	cp $(TARGET) $(DESTDIR)$(PREFIX)/bin/rigg
 
-.PHONY: all clean run
+uninstall:
+	rm -f $(DESTDIR)$(PREFIX)/bin/rigg
+
+.PHONY: all build clean run install uninstall test

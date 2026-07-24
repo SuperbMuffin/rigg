@@ -9,6 +9,7 @@ typedef struct
 
 int cmd_init(const char *dir);
 int cmd_new(const char *name);
+int cmd_add(const char *dir, int argc, char **argv);
 int cmd_build(const char *dir, BuildFlags flags);
 int cmd_run(const char *dir, BuildFlags flags);
 int cmd_check(const char *dir);
