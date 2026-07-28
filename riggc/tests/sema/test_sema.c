@@ -405,6 +405,42 @@ static void test_t001_ptr_index_non_ptr(void)
   teardown(&proj, &res);
 }
 
+static void test_ok_arrays(void)
+{
+  Project proj;
+  SemaResult res;
+  ASSERT(load("ok_arrays", &proj, &res) == 0, "project_load succeeded");
+  assert_ok(&res);
+  teardown(&proj, &res);
+}
+
+static void test_t001_array_oob(void)
+{
+  Project proj;
+  SemaResult res;
+  ASSERT(load("t001_array_oob", &proj, &res) == 0, "project_load succeeded");
+  assert_has_error(&res, "T001");
+  teardown(&proj, &res);
+}
+
+static void test_t001_array_len_mismatch(void)
+{
+  Project proj;
+  SemaResult res;
+  ASSERT(load("t001_array_len_mismatch", &proj, &res) == 0, "project_load succeeded");
+  assert_has_error(&res, "T001");
+  teardown(&proj, &res);
+}
+
+static void test_t005_array_immutable(void)
+{
+  Project proj;
+  SemaResult res;
+  ASSERT(load("t005_array_immutable", &proj, &res) == 0, "project_load succeeded");
+  assert_has_error(&res, "T005");
+  teardown(&proj, &res);
+}
+
 static void test_t001_type_mismatch(void)
 {
   Project proj;
@@ -716,6 +752,7 @@ int main(void)
   run_test("ok_multi_concept", test_ok_multi_concept);
   run_test("ok_impl_file", test_ok_impl_file);
   run_test("ok_helper_fns", test_ok_helper_fns);
+  run_test("ok_arrays", test_ok_arrays);
 
   /* entry point */
   run_test("e001_missing_main", test_e001_missing_main);
@@ -748,6 +785,9 @@ int main(void)
   /* types */
   run_test("t001_type_mismatch", test_t001_type_mismatch);
   run_test("t001_ptr_index_non_ptr", test_t001_ptr_index_non_ptr);
+  run_test("t001_array_oob", test_t001_array_oob);
+  run_test("t001_array_len_mismatch", test_t001_array_len_mismatch);
+  run_test("t005_array_immutable", test_t005_array_immutable);
   run_test("ok_ptr_str_cast", test_ok_ptr_str_cast);
   run_test("ok_cast_conversions", test_ok_cast_conversions);
   run_test("t001_invalid_cast", test_t001_invalid_cast);

@@ -1,0 +1,13 @@
+fn main() -> i32 {
+    let a: [i32; 3] = [1, 2, 3];
+    let mut b = [10, 20, 30];
+    b[0] = 5;
+    let board: [[i32; 2]; 2] = [[1, 2], [3, 4]];
+    if a[1] != 2 { return 1; }
+    if b[0] != 5 { return 2; }
+    if len(a) != 3 { return 3; }
+    if board[1][0] != 3 { return 4; }
+    if [1, 2, 3] != [1, 2, 3] { return 5; }
+    if [1, 2, 3] == [3, 2, 1] { return 6; }
+    return 0;
+}

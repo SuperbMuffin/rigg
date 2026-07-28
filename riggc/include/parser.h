@@ -25,8 +25,35 @@ typedef enum
   TYPE_STR,
   TYPE_PTR,
   TYPE_VOID,
+  TYPE_ARRAY,
   TYPE_UNKNOWN, /* sentinel: type could not be inferred */
 } TypeKind;
+
+typedef struct Type Type;
+struct Type
+{
+  TypeKind kind;
+  Type *elem;    /* TYPE_ARRAY: element type (arena-allocated) */
+  long long len; /* TYPE_ARRAY: number of elements */
+};
+
+static inline Type type_prim(TypeKind kind)
+{
+  Type t;
+  t.kind = kind;
+  t.elem = NULL;
+  t.len = 0;
+  return t;
+}
+
+static inline Type type_array(Type *elem, long long len)
+{
+  Type t;
+  t.kind = TYPE_ARRAY;
+  t.elem = elem;
+  t.len = len;
+  return t;
+}
 
 typedef enum
 {
@@ -34,6 +61,7 @@ typedef enum
   EXPR_FLOAT_LIT,
   EXPR_STR_LIT,
   EXPR_BOOL_LIT,
+  EXPR_ARRAY_LIT,
   EXPR_IDENT,
   EXPR_CALL,
   EXPR_QUAL_CALL,
@@ -72,6 +100,11 @@ struct Expr
       int len;
     } ident;
     int bval;
+    struct
+    {
+      Expr **elems;
+      int count;
+    } array;
     struct
     {
       const char *name;
@@ -115,7 +148,7 @@ struct Expr
     struct
     {
       Expr *expr;
-      TypeKind target_type;
+      Type target_type;
     } cast;
   } as;
 };
@@ -153,7 +186,7 @@ struct Stmt
     {
       const char *name;
       int name_len;
-      TypeKind type;
+      Type type;
       int is_mut;
       Expr *init;
     } let;
@@ -161,7 +194,7 @@ struct Stmt
     {
       const char *name;
       int name_len;
-      TypeKind type;
+      Type type;
       Expr *init;
     } konst;
     struct
@@ -205,7 +238,7 @@ typedef struct
 {
   const char *name;
   int name_len;
-  TypeKind type;
+  Type type;
 } Param;
 
 typedef struct
@@ -214,7 +247,7 @@ typedef struct
   int name_len;
   Param *params;
   int param_count;
-  TypeKind return_type;
+  Type return_type;
   Block body;
   int line;
 } FnDecl;
@@ -232,7 +265,7 @@ typedef struct
   int name_len;
   Param *params;
   int param_count;
-  TypeKind return_type;
+  Type return_type;
   int is_variadic;
   int line;
 } ExternDecl;

@@ -62,7 +62,7 @@ static void test_fn_no_params_no_return(void)
   ASSERT_EQ_INT(prog.fns[0].name_len, 4, "name length");
   ASSERT(memcmp(prog.fns[0].name, "main", 4) == 0, "name is 'main'");
   ASSERT_EQ_INT(prog.fns[0].param_count, 0, "no params");
-  ASSERT(prog.fns[0].return_type == TYPE_VOID, "return type is void");
+  ASSERT(prog.fns[0].return_type.kind == TYPE_VOID, "return type is void");
   parser_free(&p);
 }
 
@@ -71,7 +71,7 @@ static void test_fn_with_return_type(void)
   Parser p;
   Program prog = parse("fn get() -> i32 { return 1; }", &p);
   assert_ok(&p);
-  ASSERT(prog.fns[0].return_type == TYPE_I32, "return type is i32");
+  ASSERT(prog.fns[0].return_type.kind == TYPE_I32, "return type is i32");
   parser_free(&p);
 }
 
@@ -82,9 +82,9 @@ static void test_fn_params(void)
   assert_ok(&p);
   ASSERT_EQ_INT(prog.fns[0].param_count, 2, "two params");
   ASSERT(memcmp(prog.fns[0].params[0].name, "a", 1) == 0, "first param name");
-  ASSERT(prog.fns[0].params[0].type == TYPE_I32, "first param type");
+  ASSERT(prog.fns[0].params[0].type.kind == TYPE_I32, "first param type");
   ASSERT(memcmp(prog.fns[0].params[1].name, "b", 1) == 0, "second param name");
-  ASSERT(prog.fns[0].params[1].type == TYPE_I32, "second param type");
+  ASSERT(prog.fns[0].params[1].type.kind == TYPE_I32, "second param type");
   parser_free(&p);
 }
 
@@ -100,7 +100,7 @@ static void test_fn_all_types_as_params(void)
                          TYPE_U32, TYPE_U64, TYPE_F32, TYPE_F64, TYPE_BOOL, TYPE_STR};
   ASSERT_EQ_INT(prog.fns[0].param_count, 12, "12 params");
   for (int i = 0; i < 12; i++)
-    ASSERT(prog.fns[0].params[i].type == expected[i], "param type matches");
+    ASSERT(prog.fns[0].params[i].type.kind == expected[i], "param type matches");
   parser_free(&p);
 }
 
@@ -131,7 +131,7 @@ static void test_let_immutable(void)
   Stmt *s = prog.fns[0].body.stmts[0];
   ASSERT(s->kind == STMT_LET, "is a let");
   ASSERT(memcmp(s->as.let.name, "x", 1) == 0, "name is x");
-  ASSERT(s->as.let.type == TYPE_I32, "type is i32");
+  ASSERT(s->as.let.type.kind == TYPE_I32, "type is i32");
   ASSERT(s->as.let.is_mut == 0, "not mutable");
   ASSERT(s->as.let.init != NULL, "has initialiser");
   parser_free(&p);
@@ -156,7 +156,7 @@ static void test_const_decl(void)
   Stmt *s = prog.fns[0].body.stmts[0];
   ASSERT(s->kind == STMT_CONST, "is a const");
   ASSERT(memcmp(s->as.konst.name, "MAX", 3) == 0, "name is MAX");
-  ASSERT(s->as.konst.type == TYPE_I32, "type is i32");
+  ASSERT(s->as.konst.type.kind == TYPE_I32, "type is i32");
   ASSERT(s->as.konst.init != NULL, "has initialiser");
   parser_free(&p);
 }
@@ -467,7 +467,7 @@ static void test_cast_ptr_to_str(void)
   assert_ok(&p);
   Expr *e = prog.fns[0].body.stmts[0]->as.ret.value;
   ASSERT(e->kind == EXPR_CAST, "is cast");
-  ASSERT(e->as.cast.target_type == TYPE_STR, "casts to str");
+  ASSERT(e->as.cast.target_type.kind == TYPE_STR, "casts to str");
   ASSERT(e->as.cast.expr->kind == EXPR_IDENT, "operand is ident");
   parser_free(&p);
 }
@@ -479,7 +479,7 @@ static void test_cast_str_to_ptr(void)
   assert_ok(&p);
   Expr *e = prog.fns[0].body.stmts[0]->as.let.init;
   ASSERT(e->kind == EXPR_CAST, "is cast");
-  ASSERT(e->as.cast.target_type == TYPE_PTR, "casts to ptr");
+  ASSERT(e->as.cast.target_type.kind == TYPE_PTR, "casts to ptr");
   ASSERT(e->as.cast.expr->kind == EXPR_IDENT, "operand is ident");
   parser_free(&p);
 }
@@ -755,13 +755,60 @@ static void test_full_add_fn(void)
   FnDecl *f = &prog.fns[0];
   ASSERT(memcmp(f->name, "add", 3) == 0, "name is add");
   ASSERT_EQ_INT(f->param_count, 2, "two params");
-  ASSERT(f->return_type == TYPE_I32, "returns i32");
+  ASSERT(f->return_type.kind == TYPE_I32, "returns i32");
   ASSERT_EQ_INT(f->body.count, 1, "one stmt");
   Stmt *s = f->body.stmts[0];
   ASSERT(s->kind == STMT_RETURN, "is return");
   Expr *e = s->as.ret.value;
   ASSERT(e->kind == EXPR_BINARY, "return value is binary");
   ASSERT(e->as.binary.op == TOK_PLUS, "op is +");
+  parser_free(&p);
+}
+
+
+static void test_array_type_and_lit(void)
+{
+  Parser p;
+  Program prog = parse("fn f() { let a: [i32; 3] = [1, 2, 3]; }", &p);
+  assert_ok(&p);
+  Stmt *s = prog.fns[0].body.stmts[0];
+  ASSERT(s->kind == STMT_LET, "is let");
+  ASSERT(s->as.let.type.kind == TYPE_ARRAY, "type is array");
+  ASSERT(s->as.let.type.len == 3, "len is 3");
+  ASSERT(s->as.let.type.elem && s->as.let.type.elem->kind == TYPE_I32, "elem is i32");
+  ASSERT(s->as.let.init->kind == EXPR_ARRAY_LIT, "init is array lit");
+  ASSERT_EQ_INT(s->as.let.init->as.array.count, 3, "3 elems");
+  parser_free(&p);
+}
+
+static void test_array_lit_inferred_let(void)
+{
+  Parser p;
+  Program prog = parse("fn f() { let a = [1, 2]; }", &p);
+  assert_ok(&p);
+  Stmt *s = prog.fns[0].body.stmts[0];
+  ASSERT(s->as.let.type.kind == TYPE_UNKNOWN, "type omitted at parse");
+  ASSERT(s->as.let.init->kind == EXPR_ARRAY_LIT, "array lit");
+  parser_free(&p);
+}
+
+static void test_nested_array_type(void)
+{
+  Parser p;
+  Program prog = parse("fn f() { let a: [[i32; 2]; 2] = [[1, 2], [3, 4]]; }", &p);
+  assert_ok(&p);
+  Type t = prog.fns[0].body.stmts[0]->as.let.type;
+  ASSERT(t.kind == TYPE_ARRAY && t.len == 2, "outer array");
+  ASSERT(t.elem && t.elem->kind == TYPE_ARRAY && t.elem->len == 2, "inner array");
+  parser_free(&p);
+}
+
+static void test_empty_array_lit(void)
+{
+  Parser p;
+  Program prog = parse("fn f() { let a: [i32; 0] = []; }", &p);
+  assert_ok(&p);
+  ASSERT_EQ_INT(prog.fns[0].body.stmts[0]->as.let.init->as.array.count, 0, "empty");
   parser_free(&p);
 }
 
@@ -817,6 +864,10 @@ int main(void)
   run_test("update_expr", test_update_expr);
   run_test("ptr_index_read", test_ptr_index_read);
   run_test("ptr_index_assign", test_ptr_index_assign);
+  run_test("array_type_and_lit", test_array_type_and_lit);
+  run_test("array_lit_inferred_let", test_array_lit_inferred_let);
+  run_test("nested_array_type", test_nested_array_type);
+  run_test("empty_array_lit", test_empty_array_lit);
   run_test("cast_ptr_to_str", test_cast_ptr_to_str);
   run_test("cast_str_to_ptr", test_cast_str_to_ptr);
   run_test("cast_precedence", test_cast_precedence);

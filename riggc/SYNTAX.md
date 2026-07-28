@@ -34,8 +34,10 @@ conversions, and `bool`/`str` conversions.
 let x: i32 = 10;
 let name: str = "hello";
 let flag: bool = true;
+let a = [1, 2, 3];
 ```
 
+The type annotation may be omitted when the initializer determines the type.
 Variables are immutable by default.
 
 ```
@@ -193,6 +195,38 @@ p[0] = 65;
 
 Indexing requires a `ptr` target and an integer index. Pointer indexing reads
 and writes values typed as `i32` at the language level.
+
+---
+
+## Arrays
+
+Fixed-size arrays store elements contiguously. The length is part of the type.
+
+```
+let a: [i32; 3] = [1, 2, 3];
+let mut b = [1, 2, 3];
+```
+
+Array literals infer their element type and length. An explicit type annotation
+must match the literal length.
+
+```
+let a = [1, 2, 3];           // [i32; 3]
+let empty: [i32; 0] = [];
+let board: [[i32; 3]; 3] = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
+```
+
+Indexing is zero-based and bounds-checked. A constant out-of-bounds index is a
+compile-time error; a runtime out-of-bounds index traps. Element assignment
+requires a `mut` binding.
+
+```
+b[0] = 5;
+board[0][1];
+```
+
+`len(a)` returns the array length as `i32`. Arrays compare element-by-element
+with `==` / `!=` and copy by value.
 
 ---
 

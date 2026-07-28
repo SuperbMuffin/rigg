@@ -103,23 +103,24 @@ static void check_entry_point(const Project *proj, SemaResult *res)
                xstrdup("Invalid main signature"));
   }
 
-  if (main_fn->return_type != TYPE_VOID && main_fn->return_type != TYPE_I32)
+  if (main_fn->return_type.kind != TYPE_VOID && main_fn->return_type.kind != TYPE_I32)
   {
     push_error(res, "E002", "main.fn", main_fn->line,
                xsprintf("'main' may only return i32 or nothing, found '%s'.",
-                        main_fn->return_type == TYPE_I8     ? "i8"
-                        : main_fn->return_type == TYPE_I16  ? "i16"
-                        : main_fn->return_type == TYPE_I64  ? "i64"
-                        : main_fn->return_type == TYPE_U8   ? "u8"
-                        : main_fn->return_type == TYPE_U16  ? "u16"
-                        : main_fn->return_type == TYPE_U32  ? "u32"
-                        : main_fn->return_type == TYPE_U64  ? "u64"
-                        : main_fn->return_type == TYPE_F32  ? "f32"
-                        : main_fn->return_type == TYPE_F64  ? "f64"
-                        : main_fn->return_type == TYPE_BOOL ? "bool"
-                        : main_fn->return_type == TYPE_STR  ? "str"
-                        : main_fn->return_type == TYPE_PTR  ? "ptr"
-                                                            : "?"),
+                        main_fn->return_type.kind == TYPE_I8      ? "i8"
+                        : main_fn->return_type.kind == TYPE_I16   ? "i16"
+                        : main_fn->return_type.kind == TYPE_I64   ? "i64"
+                        : main_fn->return_type.kind == TYPE_U8    ? "u8"
+                        : main_fn->return_type.kind == TYPE_U16   ? "u16"
+                        : main_fn->return_type.kind == TYPE_U32   ? "u32"
+                        : main_fn->return_type.kind == TYPE_U64   ? "u64"
+                        : main_fn->return_type.kind == TYPE_F32   ? "f32"
+                        : main_fn->return_type.kind == TYPE_F64   ? "f64"
+                        : main_fn->return_type.kind == TYPE_BOOL  ? "bool"
+                        : main_fn->return_type.kind == TYPE_STR   ? "str"
+                        : main_fn->return_type.kind == TYPE_PTR   ? "ptr"
+                        : main_fn->return_type.kind == TYPE_ARRAY ? "array"
+                                                                  : "?"),
                xstrdup("Invalid main signature"));
   }
 }
@@ -475,6 +476,10 @@ static void check_expr_imports(const Expr *expr, int concept_idx, const char *re
     case EXPR_CAST:
       check_expr_imports(expr->as.cast.expr, concept_idx, rel_path, proj, res);
       break;
+    case EXPR_ARRAY_LIT:
+      for (int i = 0; i < expr->as.array.count; i++)
+        check_expr_imports(expr->as.array.elems[i], concept_idx, rel_path, proj, res);
+      break;
     default:
       break;
   }
@@ -561,7 +566,7 @@ typedef struct
 {
   const char *name;
   int name_len;
-  TypeKind type;
+  Type type;
   int is_mut;
 } VarEntry;
 
@@ -572,7 +577,7 @@ typedef struct
   int cap;
 } Scope;
 
-static void scope_push(Scope *s, const char *name, int name_len, TypeKind type, int is_mut)
+static void scope_push(Scope *s, const char *name, int name_len, Type type, int is_mut)
 {
   if (s->count == s->cap)
   {
@@ -593,91 +598,138 @@ static VarEntry *scope_lookup(Scope *s, const char *name, int name_len)
   return NULL;
 }
 
-static const char *type_str(TypeKind t)
+static void format_type(char *buf, size_t cap, Type t)
 {
-  switch (t)
+  if (t.kind == TYPE_ARRAY)
+  {
+    char elem[96];
+    format_type(elem, sizeof elem, t.elem ? *t.elem : type_prim(TYPE_UNKNOWN));
+    snprintf(buf, cap, "[%s; %lld]", elem, t.len);
+    return;
+  }
+  const char *name;
+  switch (t.kind)
   {
     case TYPE_I8:
-      return "i8";
+      name = "i8";
+      break;
     case TYPE_I16:
-      return "i16";
+      name = "i16";
+      break;
     case TYPE_I32:
-      return "i32";
+      name = "i32";
+      break;
     case TYPE_I64:
-      return "i64";
+      name = "i64";
+      break;
     case TYPE_U8:
-      return "u8";
+      name = "u8";
+      break;
     case TYPE_U16:
-      return "u16";
+      name = "u16";
+      break;
     case TYPE_U32:
-      return "u32";
+      name = "u32";
+      break;
     case TYPE_U64:
-      return "u64";
+      name = "u64";
+      break;
     case TYPE_F32:
-      return "f32";
+      name = "f32";
+      break;
     case TYPE_F64:
-      return "f64";
+      name = "f64";
+      break;
     case TYPE_BOOL:
-      return "bool";
+      name = "bool";
+      break;
     case TYPE_STR:
-      return "str";
+      name = "str";
+      break;
     case TYPE_PTR:
-      return "ptr";
+      name = "ptr";
+      break;
     case TYPE_VOID:
-      return "void";
+      name = "void";
+      break;
     default:
-      return "?";
+      name = "?";
+      break;
   }
+  snprintf(buf, cap, "%s", name);
 }
 
-static int is_numeric(TypeKind t)
+static const char *type_str(Type t)
 {
-  return t >= TYPE_I8 && t <= TYPE_F64;
+  static char bufs[8][128];
+  static int i;
+  char *buf = bufs[i++ & 7];
+  format_type(buf, 128, t);
+  return buf;
 }
 
-static int is_integer(TypeKind t)
+static int type_eq(Type a, Type b)
 {
-  return t >= TYPE_I8 && t <= TYPE_U64;
+  if (a.kind != b.kind)
+    return 0;
+  if (a.kind != TYPE_ARRAY)
+    return 1;
+  if (a.len != b.len)
+    return 0;
+  if (!a.elem || !b.elem)
+    return a.elem == b.elem;
+  return type_eq(*a.elem, *b.elem);
 }
 
-static int is_signed_int(TypeKind t)
+static int is_numeric(Type t)
 {
-  return t >= TYPE_I8 && t <= TYPE_I64;
+  return t.kind >= TYPE_I8 && t.kind <= TYPE_F64;
 }
 
-static int cast_compatible(TypeKind from, TypeKind to)
+static int is_integer(Type t)
 {
-  if (from == to)
+  return t.kind >= TYPE_I8 && t.kind <= TYPE_U64;
+}
+
+static int is_signed_int(Type t)
+{
+  return t.kind >= TYPE_I8 && t.kind <= TYPE_I64;
+}
+
+static int cast_compatible(Type from, Type to)
+{
+  if (type_eq(from, to))
     return 1;
   /* representation casts */
-  if ((from == TYPE_PTR && to == TYPE_STR) || (from == TYPE_STR && to == TYPE_PTR))
+  if ((from.kind == TYPE_PTR && to.kind == TYPE_STR) ||
+      (from.kind == TYPE_STR && to.kind == TYPE_PTR))
     return 1;
   /* integer conversions */
   if (is_signed_int(from) && is_signed_int(to))
     return 1;
   /* string <-> integer */
-  if (from == TYPE_STR && is_signed_int(to))
+  if (from.kind == TYPE_STR && is_signed_int(to))
     return 1;
-  if (is_signed_int(from) && to == TYPE_STR)
+  if (is_signed_int(from) && to.kind == TYPE_STR)
     return 1;
   /* string <-> float */
-  if (from == TYPE_STR && to == TYPE_F64)
+  if (from.kind == TYPE_STR && to.kind == TYPE_F64)
     return 1;
-  if (from == TYPE_STR && to == TYPE_F32)
+  if (from.kind == TYPE_STR && to.kind == TYPE_F32)
     return 1;
-  if (from == TYPE_F32 && to == TYPE_STR)
+  if (from.kind == TYPE_F32 && to.kind == TYPE_STR)
     return 1;
-  if (from == TYPE_F64 && to == TYPE_STR)
+  if (from.kind == TYPE_F64 && to.kind == TYPE_STR)
     return 1;
   /* integer <-> ptr */
-  if (is_signed_int(from) && to == TYPE_PTR)
+  if (is_signed_int(from) && to.kind == TYPE_PTR)
     return 1;
-  if (from == TYPE_PTR && is_signed_int(to))
+  if (from.kind == TYPE_PTR && is_signed_int(to))
     return 1;
   /* boolean <-> string */
-  if (from == TYPE_BOOL && to == TYPE_STR)
+  if (from.kind == TYPE_BOOL && to.kind == TYPE_STR)
     return 1;
-  if (from == TYPE_STR && to == TYPE_BOOL)
+  if (from.kind == TYPE_STR && to.kind == TYPE_BOOL)
     return 1;
   return 0;
 }
@@ -693,7 +745,7 @@ typedef struct
   int name_len;
   const Param *params;
   int param_count;
-  TypeKind return_type;
+  Type return_type;
   int is_variadic;
   int is_primary; /* 1 if this is the primary export of its .fn file */
 } FnSymbol;
@@ -703,7 +755,7 @@ typedef struct
   int concept_idx;
   const char *name;
   int name_len;
-  TypeKind type;
+  Type type;
 } GlobalVarSymbol;
 
 typedef struct
@@ -846,11 +898,22 @@ static const FnSymbol *symtable_lookup_qual_fn(const SymTable *t, int concept_id
   return NULL;
 }
 
-static TypeKind infer_expr(const Expr *e, const FnDecl *fn, Scope *scope, const char *rel_path,
-                           const SymTable *symt, int concept_idx, TypeKind hint, SemaResult *res);
-static TypeKind infer_update_expr(const Expr *e, const FnDecl *fn, Scope *scope,
-                                  const char *rel_path, const SymTable *symt, int concept_idx,
-                                  SemaResult *res);
+static Type infer_expr(const Expr *e, const FnDecl *fn, Scope *scope, const char *rel_path,
+                       const SymTable *symt, int concept_idx, Type hint, SemaResult *res);
+static Type infer_update_expr(const Expr *e, const FnDecl *fn, Scope *scope, const char *rel_path,
+                              const SymTable *symt, int concept_idx, SemaResult *res);
+
+static int index_root_is_mut(const Expr *target, Scope *scope)
+{
+  while (target && target->kind == EXPR_INDEX)
+    target = target->as.index.target;
+  if (!target || target->kind != EXPR_IDENT)
+    return 1; /* ptr expressions / non-idents: mutability not tied to a binding */
+  VarEntry *v = scope_lookup(scope, target->as.ident.ptr, target->as.ident.len);
+  if (!v)
+    return 1;
+  return v->is_mut;
+}
 
 static void check_call_args(const ArgList *args, const FnSymbol *sym, const FnDecl *fn,
                             Scope *scope, const char *rel_path, int line, const SymTable *symt,
@@ -870,9 +933,9 @@ static void check_call_args(const ArgList *args, const FnSymbol *sym, const FnDe
     /* Type-check only the fixed params; variadic args are unchecked */
     for (int i = 0; i < sym->param_count; i++)
     {
-      TypeKind arg_type = infer_expr(args->args[i], fn, scope, rel_path, symt, concept_idx,
-                                     sym->params[i].type, res);
-      if (arg_type != TYPE_UNKNOWN && arg_type != sym->params[i].type)
+      Type arg_type = infer_expr(args->args[i], fn, scope, rel_path, symt, concept_idx,
+                                 sym->params[i].type, res);
+      if (arg_type.kind != TYPE_UNKNOWN && !type_eq(arg_type, sym->params[i].type))
       {
         push_error(res, "T001", rel_path, line,
                    xsprintf("Argument %d of '%.*s': expected %s, found %s.", i + 1, sym->name_len,
@@ -893,9 +956,9 @@ static void check_call_args(const ArgList *args, const FnSymbol *sym, const FnDe
   }
   for (int i = 0; i < args->count; i++)
   {
-    TypeKind arg_type =
+    Type arg_type =
         infer_expr(args->args[i], fn, scope, rel_path, symt, concept_idx, sym->params[i].type, res);
-    if (arg_type != TYPE_UNKNOWN && arg_type != sym->params[i].type)
+    if (arg_type.kind != TYPE_UNKNOWN && !type_eq(arg_type, sym->params[i].type))
     {
       push_error(res, "T001", rel_path, line,
                  xsprintf("Argument %d of '%.*s': expected %s, found %s.", i + 1, sym->name_len,
@@ -909,29 +972,86 @@ static void check_call_args(const ArgList *args, const FnSymbol *sym, const FnDe
    already emitted or uninferrable without full type info).
    hint: the expected type at the use site, or TYPE_UNKNOWN if not known.
    Integer literals coerce to any integer type when a hint is provided. */
-static TypeKind infer_expr(const Expr *e, const FnDecl *fn, Scope *scope, const char *rel_path,
-                           const SymTable *symt, int concept_idx, TypeKind hint, SemaResult *res)
+static Type infer_expr(const Expr *e, const FnDecl *fn, Scope *scope, const char *rel_path,
+                       const SymTable *symt, int concept_idx, Type hint, SemaResult *res)
 {
   if (!e)
-    return TYPE_UNKNOWN;
+    return type_prim(TYPE_UNKNOWN);
 
   switch (e->kind)
   {
     case EXPR_INT_LIT:
       /* Coerce to any integer type when the context tells us what's expected */
-      if (hint != TYPE_UNKNOWN && is_integer(hint))
+      if (hint.kind != TYPE_UNKNOWN && is_integer(hint))
         return hint;
-      return TYPE_I32;
+      return type_prim(TYPE_I32);
     case EXPR_FLOAT_LIT:
-      return TYPE_F64;
+      return type_prim(TYPE_F64);
     case EXPR_STR_LIT:
-      return TYPE_STR;
+      return type_prim(TYPE_STR);
     case EXPR_BOOL_LIT:
-      return TYPE_BOOL;
+      return type_prim(TYPE_BOOL);
+
+    case EXPR_ARRAY_LIT:
+    {
+      Type elem_hint = type_prim(TYPE_UNKNOWN);
+      long long expected_len = -1;
+      if (hint.kind == TYPE_ARRAY)
+      {
+        if (hint.elem)
+          elem_hint = *hint.elem;
+        expected_len = hint.len;
+        if (expected_len != e->as.array.count)
+        {
+          push_error(
+              res, "T001", rel_path, e->line,
+              xsprintf("Expected array of length %lld, found %d.", expected_len, e->as.array.count),
+              xstrdup("Type mismatch"));
+          return type_prim(TYPE_UNKNOWN);
+        }
+      }
+      if (e->as.array.count == 0)
+      {
+        if (hint.kind == TYPE_ARRAY)
+          return hint;
+        push_error(res, "T001", rel_path, e->line,
+                   xstrdup("Cannot infer element type of empty array; add a type annotation."),
+                   xstrdup("Type mismatch"));
+        return type_prim(TYPE_UNKNOWN);
+      }
+      Type elem =
+          infer_expr(e->as.array.elems[0], fn, scope, rel_path, symt, concept_idx, elem_hint, res);
+      if (elem.kind == TYPE_UNKNOWN)
+        return type_prim(TYPE_UNKNOWN);
+      for (int i = 1; i < e->as.array.count; i++)
+      {
+        Type t =
+            infer_expr(e->as.array.elems[i], fn, scope, rel_path, symt, concept_idx, elem, res);
+        if (t.kind != TYPE_UNKNOWN && !type_eq(t, elem))
+        {
+          push_error(
+              res, "T001", rel_path, e->line,
+              xsprintf("Array element %d: expected %s, found %s.", i, type_str(elem), type_str(t)),
+              xstrdup("Type mismatch"));
+          return type_prim(TYPE_UNKNOWN);
+        }
+      }
+      /* Element type storage: reuse hint's elem pointer when available so the
+         returned Type remains valid without an arena in sema. Otherwise copy
+         into a heap allocation owned for the rest of compilation via... we
+         don't have an arena in sema. Use a static freelist of Types? Or store
+         elem by value only one level deep.
+
+         For nested array lits like [[1,2],[3,4]], elem itself is TYPE_ARRAY
+         and needs a stable elem pointer. Allocate with util_xmalloc; these
+         leak for process lifetime which is fine for a compiler. */
+      Type *elem_storage = util_xmalloc(sizeof(Type));
+      *elem_storage = elem;
+      return type_array(elem_storage, e->as.array.count);
+    }
 
     case EXPR_IDENT:
     {
-      /* Fix #2: use the dedicated ident field, not the sval alias */
       VarEntry *v = scope_lookup(scope, e->as.ident.ptr, e->as.ident.len);
       if (v)
         return v->type;
@@ -948,19 +1068,19 @@ static TypeKind infer_expr(const Expr *e, const FnDecl *fn, Scope *scope, const 
       push_error(res, "I005", rel_path, e->line, ctx,
                  xsprintf("Unknown identifier '%.*s'", e->as.ident.len, e->as.ident.ptr));
 
-      return TYPE_UNKNOWN;
+      return type_prim(TYPE_UNKNOWN);
     }
 
     case EXPR_ASSIGN:
     {
       Expr *target = e->as.assign.target;
-      TypeKind rhs_type = TYPE_UNKNOWN;
+      Type rhs_type = type_prim(TYPE_UNKNOWN);
 
       if (target->kind == EXPR_IDENT)
       {
         VarEntry *v = scope_lookup(scope, target->as.ident.ptr, target->as.ident.len);
         if (!v)
-          return TYPE_UNKNOWN;
+          return type_prim(TYPE_UNKNOWN);
 
         if (!v->is_mut)
         {
@@ -978,36 +1098,70 @@ static TypeKind infer_expr(const Expr *e, const FnDecl *fn, Scope *scope, const 
       }
       else if (target->kind == EXPR_INDEX)
       {
-        TypeKind ptr_type = infer_expr(target->as.index.target, fn, scope, rel_path, symt,
-                                       concept_idx, TYPE_UNKNOWN, res);
-        TypeKind idx_type = infer_expr(target->as.index.index, fn, scope, rel_path, symt,
-                                       concept_idx, TYPE_I32, res);
-        if (ptr_type != TYPE_PTR)
+        Type target_type = infer_expr(target->as.index.target, fn, scope, rel_path, symt,
+                                      concept_idx, type_prim(TYPE_UNKNOWN), res);
+        Type idx_type = infer_expr(target->as.index.index, fn, scope, rel_path, symt, concept_idx,
+                                   type_prim(TYPE_I32), res);
+        if (target_type.kind == TYPE_PTR)
+        {
+          if (idx_type.kind != TYPE_UNKNOWN && !is_integer(idx_type))
+          {
+            push_error(res, "T001", rel_path, e->line,
+                       xsprintf("Index must be an integer type, found %s.", type_str(idx_type)),
+                       xstrdup("Type mismatch"));
+            return type_prim(TYPE_UNKNOWN);
+          }
+          rhs_type = type_prim(TYPE_I32);
+        }
+        else if (target_type.kind == TYPE_ARRAY)
+        {
+          if (!index_root_is_mut(target, scope))
+          {
+            push_error(res, "T005", rel_path, e->line,
+                       xstrdup("Cannot assign to element of immutable array.\n"
+                               "  Declare the array with 'let mut'."),
+                       xstrdup("Reassignment of immutable variable"));
+            return target_type.elem ? *target_type.elem : type_prim(TYPE_UNKNOWN);
+          }
+          if (idx_type.kind != TYPE_UNKNOWN && !is_integer(idx_type))
+          {
+            push_error(res, "T001", rel_path, e->line,
+                       xsprintf("Index must be an integer type, found %s.", type_str(idx_type)),
+                       xstrdup("Type mismatch"));
+            return type_prim(TYPE_UNKNOWN);
+          }
+          if (target->as.index.index->kind == EXPR_INT_LIT)
+          {
+            long long idx = target->as.index.index->as.ival;
+            if (idx < 0 || idx >= target_type.len)
+            {
+              push_error(res, "T001", rel_path, e->line,
+                         xsprintf("Index %lld out of bounds for array of length %lld.", idx,
+                                  target_type.len),
+                         xstrdup("Type mismatch"));
+              return type_prim(TYPE_UNKNOWN);
+            }
+          }
+          rhs_type = target_type.elem ? *target_type.elem : type_prim(TYPE_UNKNOWN);
+        }
+        else
         {
           push_error(res, "T001", rel_path, e->line,
-                     xsprintf("Indexing requires ptr, found %s.", type_str(ptr_type)),
+                     xsprintf("Indexing requires ptr or array, found %s.", type_str(target_type)),
                      xstrdup("Type mismatch"));
-          return TYPE_UNKNOWN;
+          return type_prim(TYPE_UNKNOWN);
         }
-        if (idx_type != TYPE_UNKNOWN && !is_integer(idx_type))
-        {
-          push_error(res, "T001", rel_path, e->line,
-                     xsprintf("Index must be an integer type, found %s.", type_str(idx_type)),
-                     xstrdup("Type mismatch"));
-          return TYPE_UNKNOWN;
-        }
-        rhs_type = TYPE_I32;
       }
       else
       {
         push_error(res, "T001", rel_path, e->line, xstrdup("Invalid assignment target."),
                    xstrdup("Type mismatch"));
-        return TYPE_UNKNOWN;
+        return type_prim(TYPE_UNKNOWN);
       }
 
-      TypeKind rhs =
+      Type rhs =
           infer_expr(e->as.assign.value, fn, scope, rel_path, symt, concept_idx, rhs_type, res);
-      if (rhs != TYPE_UNKNOWN && rhs != rhs_type)
+      if (rhs.kind != TYPE_UNKNOWN && !type_eq(rhs, rhs_type))
       {
         push_error(res, "T001", rel_path, e->line,
                    xsprintf("Expected %s, found %s.", type_str(rhs_type), type_str(rhs)),
@@ -1021,43 +1175,66 @@ static TypeKind infer_expr(const Expr *e, const FnDecl *fn, Scope *scope, const 
 
     case EXPR_INDEX:
     {
-      TypeKind target =
-          infer_expr(e->as.index.target, fn, scope, rel_path, symt, concept_idx, TYPE_UNKNOWN, res);
-      TypeKind idx =
-          infer_expr(e->as.index.index, fn, scope, rel_path, symt, concept_idx, TYPE_I32, res);
-      if (target != TYPE_PTR)
+      Type target = infer_expr(e->as.index.target, fn, scope, rel_path, symt, concept_idx,
+                               type_prim(TYPE_UNKNOWN), res);
+      Type idx = infer_expr(e->as.index.index, fn, scope, rel_path, symt, concept_idx,
+                            type_prim(TYPE_I32), res);
+      if (target.kind == TYPE_PTR)
       {
-        push_error(res, "T001", rel_path, e->line,
-                   xsprintf("Indexing requires ptr, found %s.", type_str(target)),
-                   xstrdup("Type mismatch"));
-        return TYPE_UNKNOWN;
+        if (idx.kind != TYPE_UNKNOWN && !is_integer(idx))
+        {
+          push_error(res, "T001", rel_path, e->line,
+                     xsprintf("Index must be an integer type, found %s.", type_str(idx)),
+                     xstrdup("Type mismatch"));
+          return type_prim(TYPE_UNKNOWN);
+        }
+        return type_prim(TYPE_I32);
       }
-      if (idx != TYPE_UNKNOWN && !is_integer(idx))
+      if (target.kind == TYPE_ARRAY)
       {
-        push_error(res, "T001", rel_path, e->line,
-                   xsprintf("Index must be an integer type, found %s.", type_str(idx)),
-                   xstrdup("Type mismatch"));
-        return TYPE_UNKNOWN;
+        if (idx.kind != TYPE_UNKNOWN && !is_integer(idx))
+        {
+          push_error(res, "T001", rel_path, e->line,
+                     xsprintf("Index must be an integer type, found %s.", type_str(idx)),
+                     xstrdup("Type mismatch"));
+          return type_prim(TYPE_UNKNOWN);
+        }
+        if (e->as.index.index->kind == EXPR_INT_LIT)
+        {
+          long long i = e->as.index.index->as.ival;
+          if (i < 0 || i >= target.len)
+          {
+            push_error(
+                res, "T001", rel_path, e->line,
+                xsprintf("Index %lld out of bounds for array of length %lld.", i, target.len),
+                xstrdup("Type mismatch"));
+            return type_prim(TYPE_UNKNOWN);
+          }
+        }
+        return target.elem ? *target.elem : type_prim(TYPE_UNKNOWN);
       }
-      return TYPE_I32;
+      push_error(res, "T001", rel_path, e->line,
+                 xsprintf("Indexing requires ptr or array, found %s.", type_str(target)),
+                 xstrdup("Type mismatch"));
+      return type_prim(TYPE_UNKNOWN);
     }
 
     case EXPR_UNARY:
     {
-      TypeKind operand = infer_expr(e->as.unary.operand, fn, scope, rel_path, symt, concept_idx,
-                                    TYPE_UNKNOWN, res);
-      if (operand == TYPE_UNKNOWN)
-        return TYPE_UNKNOWN;
+      Type operand = infer_expr(e->as.unary.operand, fn, scope, rel_path, symt, concept_idx,
+                                type_prim(TYPE_UNKNOWN), res);
+      if (operand.kind == TYPE_UNKNOWN)
+        return type_prim(TYPE_UNKNOWN);
       if (e->as.unary.op == TOK_BANG)
       {
-        if (operand != TYPE_BOOL)
+        if (operand.kind != TYPE_BOOL)
         {
           push_error(res, "T001", rel_path, e->line,
                      xsprintf("Operator '!' requires bool, found %s.", type_str(operand)),
                      xstrdup("Type mismatch"));
-          return TYPE_UNKNOWN;
+          return type_prim(TYPE_UNKNOWN);
         }
-        return TYPE_BOOL;
+        return type_prim(TYPE_BOOL);
       }
       if (e->as.unary.op == TOK_MINUS)
       {
@@ -1066,85 +1243,111 @@ static TypeKind infer_expr(const Expr *e, const FnDecl *fn, Scope *scope, const 
           push_error(res, "T001", rel_path, e->line,
                      xsprintf("Operator '-' requires numeric type, found %s.", type_str(operand)),
                      xstrdup("Type mismatch"));
-          return TYPE_UNKNOWN;
+          return type_prim(TYPE_UNKNOWN);
         }
         return operand;
       }
-      return TYPE_UNKNOWN;
+      return type_prim(TYPE_UNKNOWN);
     }
 
     case EXPR_BINARY:
     {
-      TypeKind lhs =
-          infer_expr(e->as.binary.left, fn, scope, rel_path, symt, concept_idx, TYPE_UNKNOWN, res);
-      TypeKind rhs =
-          infer_expr(e->as.binary.right, fn, scope, rel_path, symt, concept_idx, lhs, res);
-      if (lhs == TYPE_UNKNOWN || rhs == TYPE_UNKNOWN)
-        return TYPE_UNKNOWN;
+      Type lhs = infer_expr(e->as.binary.left, fn, scope, rel_path, symt, concept_idx,
+                            type_prim(TYPE_UNKNOWN), res);
+      Type rhs = infer_expr(e->as.binary.right, fn, scope, rel_path, symt, concept_idx, lhs, res);
+      if (lhs.kind == TYPE_UNKNOWN || rhs.kind == TYPE_UNKNOWN)
+        return type_prim(TYPE_UNKNOWN);
 
       TokenKind op = e->as.binary.op;
 
       if (op == TOK_EQ || op == TOK_NEQ)
       {
-        if (lhs != rhs)
+        if (!type_eq(lhs, rhs))
         {
           push_error(res, "T001", rel_path, e->line,
                      xsprintf("Expected %s, found %s.", type_str(lhs), type_str(rhs)),
                      xstrdup("Type mismatch"));
-          return TYPE_UNKNOWN;
+          return type_prim(TYPE_UNKNOWN);
         }
-        return TYPE_BOOL;
+        return type_prim(TYPE_BOOL);
       }
       if (op == TOK_LT || op == TOK_GT || op == TOK_LTE || op == TOK_GTE)
       {
-        if (lhs != rhs || !is_numeric(lhs))
+        if (!type_eq(lhs, rhs) || !is_numeric(lhs))
         {
           push_error(res, "T001", rel_path, e->line,
-                     lhs != rhs
+                     !type_eq(lhs, rhs)
                          ? xsprintf("Expected %s, found %s.", type_str(lhs), type_str(rhs))
                          : xsprintf("Comparison requires numeric type, found %s.", type_str(lhs)),
                      xstrdup("Type mismatch"));
-          return TYPE_UNKNOWN;
+          return type_prim(TYPE_UNKNOWN);
         }
-        return TYPE_BOOL;
+        return type_prim(TYPE_BOOL);
       }
       if (op == TOK_AND || op == TOK_OR)
       {
-        if (lhs != TYPE_BOOL || rhs != TYPE_BOOL)
+        if (lhs.kind != TYPE_BOOL || rhs.kind != TYPE_BOOL)
         {
           push_error(res, "T001", rel_path, e->line,
                      xsprintf("Operator '%s' requires bool operands.", op == TOK_AND ? "&&" : "||"),
                      xstrdup("Type mismatch"));
-          return TYPE_UNKNOWN;
+          return type_prim(TYPE_UNKNOWN);
         }
-        return TYPE_BOOL;
+        return type_prim(TYPE_BOOL);
       }
-      if (lhs != rhs)
+      if (!type_eq(lhs, rhs))
       {
         push_error(res, "T001", rel_path, e->line,
                    xsprintf("Expected %s, found %s.", type_str(lhs), type_str(rhs)),
                    xstrdup("Type mismatch"));
-        return TYPE_UNKNOWN;
+        return type_prim(TYPE_UNKNOWN);
       }
       if (!is_numeric(lhs))
       {
         push_error(res, "T001", rel_path, e->line,
                    xsprintf("Arithmetic requires numeric type, found %s.", type_str(lhs)),
                    xstrdup("Type mismatch"));
-        return TYPE_UNKNOWN;
+        return type_prim(TYPE_UNKNOWN);
       }
       if (op == TOK_PERCENT && !is_integer(lhs))
       {
         push_error(res, "T001", rel_path, e->line,
                    xsprintf("Operator '%%' requires integer type, found %s.", type_str(lhs)),
                    xstrdup("Type mismatch"));
-        return TYPE_UNKNOWN;
+        return type_prim(TYPE_UNKNOWN);
       }
       return lhs;
     }
 
     case EXPR_CALL:
     {
+      /* Builtin len(array) -> i32 */
+      if (e->as.call.name_len == 3 && memcmp(e->as.call.name, "len", 3) == 0)
+      {
+        const FnSymbol *existing =
+            symtable_lookup_local_fn(symt, concept_idx, e->as.call.name, e->as.call.name_len);
+        if (!existing)
+        {
+          if (e->as.call.args.count != 1)
+          {
+            push_error(res, "T001", rel_path, e->line,
+                       xsprintf("'len' expects 1 argument, got %d.", e->as.call.args.count),
+                       xstrdup("Argument count mismatch"));
+            return type_prim(TYPE_UNKNOWN);
+          }
+          Type arg = infer_expr(e->as.call.args.args[0], fn, scope, rel_path, symt, concept_idx,
+                                type_prim(TYPE_UNKNOWN), res);
+          if (arg.kind != TYPE_UNKNOWN && arg.kind != TYPE_ARRAY)
+          {
+            push_error(res, "T001", rel_path, e->line,
+                       xsprintf("'len' requires an array, found %s.", type_str(arg)),
+                       xstrdup("Type mismatch"));
+            return type_prim(TYPE_UNKNOWN);
+          }
+          return type_prim(TYPE_I32);
+        }
+      }
+
       const FnSymbol *sym =
           symtable_lookup_local_fn(symt, concept_idx, e->as.call.name, e->as.call.name_len);
       if (!sym)
@@ -1156,7 +1359,7 @@ static TypeKind infer_expr(const Expr *e, const FnDecl *fn, Scope *scope, const 
                                  : "");
         push_error(res, "I005", rel_path, e->line, ctx,
                    xsprintf("Unknown function '%.*s'", e->as.call.name_len, e->as.call.name));
-        return TYPE_UNKNOWN;
+        return type_prim(TYPE_UNKNOWN);
       }
       check_call_args(&e->as.call.args, sym, fn, scope, rel_path, e->line, symt, concept_idx, res);
       return sym->return_type;
@@ -1167,11 +1370,11 @@ static TypeKind infer_expr(const Expr *e, const FnDecl *fn, Scope *scope, const 
       int tgt_idx =
           project_concept_index(symt->proj, e->as.qual_call.concept, e->as.qual_call.concept_len);
       if (tgt_idx < 0)
-        return TYPE_UNKNOWN;
+        return type_prim(TYPE_UNKNOWN);
       const FnSymbol *sym =
           symtable_lookup_qual_fn(symt, tgt_idx, e->as.qual_call.name, e->as.qual_call.name_len);
       if (!sym)
-        return TYPE_UNKNOWN;
+        return type_prim(TYPE_UNKNOWN);
       check_call_args(&e->as.qual_call.args, sym, fn, scope, rel_path, e->line, symt, concept_idx,
                       res);
       return sym->return_type;
@@ -1179,40 +1382,39 @@ static TypeKind infer_expr(const Expr *e, const FnDecl *fn, Scope *scope, const 
 
     case EXPR_CAST:
     {
-      TypeKind src =
-          infer_expr(e->as.cast.expr, fn, scope, rel_path, symt, concept_idx, TYPE_UNKNOWN, res);
-      TypeKind dst = e->as.cast.target_type;
-      if (src == TYPE_UNKNOWN)
-        return TYPE_UNKNOWN;
+      Type src = infer_expr(e->as.cast.expr, fn, scope, rel_path, symt, concept_idx,
+                            type_prim(TYPE_UNKNOWN), res);
+      Type dst = e->as.cast.target_type;
+      if (src.kind == TYPE_UNKNOWN)
+        return type_prim(TYPE_UNKNOWN);
       if (!cast_compatible(src, dst))
       {
         push_error(res, "T001", rel_path, e->line,
                    xsprintf("Cannot cast %s to %s.", type_str(src), type_str(dst)),
                    xstrdup("Type mismatch"));
-        return TYPE_UNKNOWN;
+        return type_prim(TYPE_UNKNOWN);
       }
       return dst;
     }
   }
 
-  return TYPE_UNKNOWN;
+  return type_prim(TYPE_UNKNOWN);
 }
 
-static TypeKind infer_update_expr(const Expr *e, const FnDecl *fn, Scope *scope,
-                                  const char *rel_path, const SymTable *symt, int concept_idx,
-                                  SemaResult *res)
+static Type infer_update_expr(const Expr *e, const FnDecl *fn, Scope *scope, const char *rel_path,
+                              const SymTable *symt, int concept_idx, SemaResult *res)
 {
   Expr *target = e->as.update.target;
   if (!target || target->kind != EXPR_IDENT)
   {
     push_error(res, "T001", rel_path, e->line, xstrdup("Invalid assignment target."),
                xstrdup("Type mismatch"));
-    return TYPE_UNKNOWN;
+    return type_prim(TYPE_UNKNOWN);
   }
 
   VarEntry *v = scope_lookup(scope, target->as.ident.ptr, target->as.ident.len);
   if (!v)
-    return infer_expr(target, fn, scope, rel_path, symt, concept_idx, TYPE_I32, res);
+    return infer_expr(target, fn, scope, rel_path, symt, concept_idx, type_prim(TYPE_I32), res);
 
   if (!v->is_mut)
   {
@@ -1226,15 +1428,15 @@ static TypeKind infer_update_expr(const Expr *e, const FnDecl *fn, Scope *scope,
     return v->type;
   }
 
-  if (v->type != TYPE_I32)
+  if (v->type.kind != TYPE_I32)
   {
     push_error(res, "T001", rel_path, e->line,
                xsprintf("Increment and decrement require i32, found %s.", type_str(v->type)),
                xstrdup("Type mismatch"));
-    return TYPE_UNKNOWN;
+    return type_prim(TYPE_UNKNOWN);
   }
 
-  return TYPE_I32;
+  return type_prim(TYPE_I32);
 }
 
 /* Returns 1 if an expression is a boolean literal 'true' */
@@ -1302,31 +1504,62 @@ static void check_stmt_types(const Stmt *s, const FnDecl *fn, Scope *scope, cons
     case STMT_LET:
     {
       /* Pass declared type as hint so integer literals coerce correctly */
-      TypeKind init_type =
-          infer_expr(s->as.let.init, fn, scope, rel_path, symt, concept_idx, s->as.let.type, res);
-      if (init_type != TYPE_UNKNOWN && init_type != s->as.let.type)
+      Type declared = s->as.let.type;
+      int err_before = res->count;
+      Type init_type =
+          infer_expr(s->as.let.init, fn, scope, rel_path, symt, concept_idx, declared, res);
+      if (declared.kind == TYPE_UNKNOWN)
       {
-        push_error(
-            res, "T001", rel_path, s->line,
-            xsprintf("Expected %s, found %s.", type_str(s->as.let.type), type_str(init_type)),
-            xstrdup("Type mismatch"));
+        if (init_type.kind == TYPE_UNKNOWN)
+        {
+          if (res->count == err_before)
+            push_error(res, "T001", rel_path, s->line,
+                       xstrdup("Cannot infer type; add a type annotation."),
+                       xstrdup("Type mismatch"));
+          declared = type_prim(TYPE_UNKNOWN);
+        }
+        else
+          declared = init_type;
       }
-      scope_push(scope, s->as.let.name, s->as.let.name_len, s->as.let.type, s->as.let.is_mut);
+      else if (init_type.kind != TYPE_UNKNOWN && !type_eq(init_type, declared))
+      {
+        push_error(res, "T001", rel_path, s->line,
+                   xsprintf("Expected %s, found %s.", type_str(declared), type_str(init_type)),
+                   xstrdup("Type mismatch"));
+      }
+      /* Persist inferred type for codegen */
+      ((Stmt *) s)->as.let.type = declared;
+      scope_push(scope, s->as.let.name, s->as.let.name_len, declared, s->as.let.is_mut);
       break;
     }
 
     case STMT_CONST:
     {
-      TypeKind init_type = infer_expr(s->as.konst.init, fn, scope, rel_path, symt, concept_idx,
-                                      s->as.konst.type, res);
-      if (init_type != TYPE_UNKNOWN && init_type != s->as.konst.type)
+      Type declared = s->as.konst.type;
+      int err_before = res->count;
+      Type init_type =
+          infer_expr(s->as.konst.init, fn, scope, rel_path, symt, concept_idx, declared, res);
+      if (declared.kind == TYPE_UNKNOWN)
       {
-        push_error(
-            res, "T001", rel_path, s->line,
-            xsprintf("Expected %s, found %s.", type_str(s->as.konst.type), type_str(init_type)),
-            xstrdup("Type mismatch"));
+        if (init_type.kind == TYPE_UNKNOWN)
+        {
+          if (res->count == err_before)
+            push_error(res, "T001", rel_path, s->line,
+                       xstrdup("Cannot infer type; add a type annotation."),
+                       xstrdup("Type mismatch"));
+          declared = type_prim(TYPE_UNKNOWN);
+        }
+        else
+          declared = init_type;
       }
-      scope_push(scope, s->as.konst.name, s->as.konst.name_len, s->as.konst.type, /*is_mut=*/0);
+      else if (init_type.kind != TYPE_UNKNOWN && !type_eq(init_type, declared))
+      {
+        push_error(res, "T001", rel_path, s->line,
+                   xsprintf("Expected %s, found %s.", type_str(declared), type_str(init_type)),
+                   xstrdup("Type mismatch"));
+      }
+      ((Stmt *) s)->as.konst.type = declared;
+      scope_push(scope, s->as.konst.name, s->as.konst.name_len, declared, /*is_mut=*/0);
       break;
     }
 
@@ -1337,7 +1570,7 @@ static void check_stmt_types(const Stmt *s, const FnDecl *fn, Scope *scope, cons
         push_error(res, "S004", rel_path, s->line, NULL, xstrdup("'return' used inside defer"));
         break;
       }
-      if (fn->return_type == TYPE_VOID && s->as.ret.value)
+      if (fn->return_type.kind == TYPE_VOID && s->as.ret.value)
       {
         push_error(res, "T004", rel_path, s->line,
                    xsprintf("Function '%.*s' has no return type but returns a value.", fn->name_len,
@@ -1345,7 +1578,7 @@ static void check_stmt_types(const Stmt *s, const FnDecl *fn, Scope *scope, cons
                    xsprintf("Unexpected return value in '%.*s'", fn->name_len, fn->name));
         break;
       }
-      if (fn->return_type != TYPE_VOID && !s->as.ret.value)
+      if (fn->return_type.kind != TYPE_VOID && !s->as.ret.value)
       {
         push_error(res, "S005", rel_path, s->line,
                    xsprintf("Function '%.*s' declares return type %s but 'return' has no value.",
@@ -1353,11 +1586,11 @@ static void check_stmt_types(const Stmt *s, const FnDecl *fn, Scope *scope, cons
                    xsprintf("Bare return in non-void function '%.*s'", fn->name_len, fn->name));
         break;
       }
-      if (fn->return_type != TYPE_VOID && s->as.ret.value)
+      if (fn->return_type.kind != TYPE_VOID && s->as.ret.value)
       {
-        TypeKind ret_type = infer_expr(s->as.ret.value, fn, scope, rel_path, symt, concept_idx,
-                                       fn->return_type, res);
-        if (ret_type != TYPE_UNKNOWN && ret_type != fn->return_type)
+        Type ret_type = infer_expr(s->as.ret.value, fn, scope, rel_path, symt, concept_idx,
+                                   fn->return_type, res);
+        if (ret_type.kind != TYPE_UNKNOWN && !type_eq(ret_type, fn->return_type))
         {
           push_error(
               res, "T001", rel_path, s->line,
@@ -1369,7 +1602,8 @@ static void check_stmt_types(const Stmt *s, const FnDecl *fn, Scope *scope, cons
     }
 
     case STMT_IF:
-      infer_expr(s->as.sif.cond, fn, scope, rel_path, symt, concept_idx, TYPE_UNKNOWN, res);
+      infer_expr(s->as.sif.cond, fn, scope, rel_path, symt, concept_idx, type_prim(TYPE_UNKNOWN),
+                 res);
       check_block_types(&s->as.sif.then_block, fn, scope, rel_path, symt, concept_idx, loop_depth,
                         in_defer, res);
       check_block_types(&s->as.sif.else_block, fn, scope, rel_path, symt, concept_idx, loop_depth,
@@ -1381,15 +1615,16 @@ static void check_stmt_types(const Stmt *s, const FnDecl *fn, Scope *scope, cons
       int saved = scope->count;
       check_stmt_types(s->as.sfor.init, fn, scope, rel_path, symt, concept_idx, loop_depth,
                        in_defer, res);
-      TypeKind cond =
-          infer_expr(s->as.sfor.cond, fn, scope, rel_path, symt, concept_idx, TYPE_UNKNOWN, res);
-      if (cond != TYPE_UNKNOWN && cond != TYPE_BOOL)
+      Type cond = infer_expr(s->as.sfor.cond, fn, scope, rel_path, symt, concept_idx,
+                             type_prim(TYPE_UNKNOWN), res);
+      if (cond.kind != TYPE_UNKNOWN && cond.kind != TYPE_BOOL)
       {
         push_error(res, "T001", rel_path, s->line,
                    xsprintf("For condition must be bool, found %s.", type_str(cond)),
                    xstrdup("Type mismatch"));
       }
-      infer_expr(s->as.sfor.post, fn, scope, rel_path, symt, concept_idx, TYPE_UNKNOWN, res);
+      infer_expr(s->as.sfor.post, fn, scope, rel_path, symt, concept_idx, type_prim(TYPE_UNKNOWN),
+                 res);
       check_block_types(&s->as.sfor.body, fn, scope, rel_path, symt, concept_idx, loop_depth + 1,
                         in_defer, res);
       scope->count = saved;
@@ -1398,9 +1633,9 @@ static void check_stmt_types(const Stmt *s, const FnDecl *fn, Scope *scope, cons
 
     case STMT_WHILE:
     {
-      TypeKind cond =
-          infer_expr(s->as.swhile.cond, fn, scope, rel_path, symt, concept_idx, TYPE_UNKNOWN, res);
-      if (cond != TYPE_UNKNOWN && cond != TYPE_BOOL)
+      Type cond = infer_expr(s->as.swhile.cond, fn, scope, rel_path, symt, concept_idx,
+                             type_prim(TYPE_UNKNOWN), res);
+      if (cond.kind != TYPE_UNKNOWN && cond.kind != TYPE_BOOL)
       {
         push_error(res, "T001", rel_path, s->line,
                    xsprintf("While condition must be bool, found %s.", type_str(cond)),
@@ -1422,7 +1657,8 @@ static void check_stmt_types(const Stmt *s, const FnDecl *fn, Scope *scope, cons
       break;
 
     case STMT_EXPR:
-      infer_expr(s->as.sexpr.expr, fn, scope, rel_path, symt, concept_idx, TYPE_UNKNOWN, res);
+      infer_expr(s->as.sexpr.expr, fn, scope, rel_path, symt, concept_idx, type_prim(TYPE_UNKNOWN),
+                 res);
       break;
 
     case STMT_BREAK:
@@ -1470,7 +1706,7 @@ static void check_fn_types(const FnDecl *fn, const char *rel_path, const SymTabl
 
   check_block_types(&fn->body, fn, &scope, rel_path, symt, concept_idx, 0, /*in_defer=*/0, res);
 
-  if (fn->return_type != TYPE_VOID && !block_always_returns(&fn->body))
+  if (fn->return_type.kind != TYPE_VOID && !block_always_returns(&fn->body))
   {
     push_error(res, "T003", rel_path, fn->line,
                xsprintf("Function '%.*s' declares return type %s but not all "

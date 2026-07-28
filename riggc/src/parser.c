@@ -136,50 +136,84 @@ static void recover(Parser *p, int in_block)
   p->recovering = 0;
 }
 
-static int parse_type(Parser *p, TypeKind *out)
+static int parse_type(Parser *p, Type *out)
 {
   if (p->recovering)
     return 0;
+
+  if (match(p, TOK_LBRACKET))
+  {
+    Type *elem = arena_alloc(p, sizeof(Type));
+    if (!elem)
+      return 0;
+    if (!parse_type(p, elem))
+      return 0;
+    if (!expect(p, TOK_SEMI, "';'"))
+      return 0;
+    if (!check(p, TOK_INT_LIT))
+    {
+      push_error(p, p->current.line, "T002", "expected array length but got '%.*s'", p->current.len,
+                 p->current.start);
+      return 0;
+    }
+    char buf[32];
+    int len = p->current.len < 31 ? p->current.len : 31;
+    memcpy(buf, p->current.start, (size_t) len);
+    buf[len] = '\0';
+    long long n = strtoll(buf, NULL, 10);
+    advance_token(p);
+    if (n < 0)
+    {
+      push_error(p, p->previous.line, "T002", "array length must be non-negative");
+      return 0;
+    }
+    if (!expect(p, TOK_RBRACKET, "']'"))
+      return 0;
+    *out = type_array(elem, n);
+    return 1;
+  }
+
+  TypeKind kind;
   switch (p->current.kind)
   {
     case TOK_I8:
-      *out = TYPE_I8;
+      kind = TYPE_I8;
       break;
     case TOK_I16:
-      *out = TYPE_I16;
+      kind = TYPE_I16;
       break;
     case TOK_I32:
-      *out = TYPE_I32;
+      kind = TYPE_I32;
       break;
     case TOK_I64:
-      *out = TYPE_I64;
+      kind = TYPE_I64;
       break;
     case TOK_U8:
-      *out = TYPE_U8;
+      kind = TYPE_U8;
       break;
     case TOK_U16:
-      *out = TYPE_U16;
+      kind = TYPE_U16;
       break;
     case TOK_U32:
-      *out = TYPE_U32;
+      kind = TYPE_U32;
       break;
     case TOK_U64:
-      *out = TYPE_U64;
+      kind = TYPE_U64;
       break;
     case TOK_F32:
-      *out = TYPE_F32;
+      kind = TYPE_F32;
       break;
     case TOK_F64:
-      *out = TYPE_F64;
+      kind = TYPE_F64;
       break;
     case TOK_BOOL:
-      *out = TYPE_BOOL;
+      kind = TYPE_BOOL;
       break;
     case TOK_STR:
-      *out = TYPE_STR;
+      kind = TYPE_STR;
       break;
     case TOK_PTR:
-      *out = TYPE_PTR;
+      kind = TYPE_PTR;
       break;
     default:
       push_error(p, p->current.line, "T002", "expected a type but got '%.*s'", p->current.len,
@@ -187,6 +221,7 @@ static int parse_type(Parser *p, TypeKind *out)
       return 0;
   }
   advance_token(p);
+  *out = type_prim(kind);
   return 1;
 }
 
@@ -297,6 +332,44 @@ static Expr *parse_primary(Parser *p)
     Expr *e = parse_expr(p);
     if (!e || !expect(p, TOK_RPAREN, "')'"))
       return NULL;
+    return e;
+  }
+
+  if (match(p, TOK_LBRACKET))
+  {
+    Expr *e = make_expr(p, EXPR_ARRAY_LIT, line);
+    if (!e)
+      return NULL;
+    Expr **elems = NULL;
+    int count = 0, cap = 0;
+    if (!check(p, TOK_RBRACKET) && !check(p, TOK_EOF))
+    {
+      do
+      {
+        if (count == cap)
+        {
+          cap = cap ? cap * 2 : 4;
+          elems = safe_realloc(elems, (size_t) cap * sizeof(Expr *));
+        }
+        elems[count++] = parse_expr(p);
+        if (p->recovering || !elems[count - 1])
+          break;
+      } while (match(p, TOK_COMMA));
+    }
+    if (!expect(p, TOK_RBRACKET, "']'"))
+    {
+      free(elems);
+      return NULL;
+    }
+    if (count)
+    {
+      Expr **arena_elems = arena_alloc(p, (size_t) count * sizeof(Expr *));
+      if (arena_elems)
+        memcpy(arena_elems, elems, (size_t) count * sizeof(Expr *));
+      e->as.array.elems = arena_elems;
+    }
+    e->as.array.count = count;
+    free(elems);
     return e;
   }
 
@@ -471,7 +544,7 @@ static Expr *parse_cast(Parser *p)
   while (e && match(p, TOK_AS))
   {
     int line = p->previous.line;
-    TypeKind target;
+    Type target;
     if (!parse_type(p, &target))
       return NULL;
     Expr *cast = make_expr(p, EXPR_CAST, line);
@@ -511,10 +584,12 @@ static Stmt *parse_let(Parser *p)
   s->as.let.name_len = p->current.len;
   if (!expect(p, TOK_IDENT, "variable name"))
     return NULL;
-  if (!expect(p, TOK_COLON, "':'"))
-    return NULL;
-  if (!parse_type(p, &s->as.let.type))
-    return NULL;
+  s->as.let.type = type_prim(TYPE_UNKNOWN);
+  if (match(p, TOK_COLON))
+  {
+    if (!parse_type(p, &s->as.let.type))
+      return NULL;
+  }
   if (!expect(p, TOK_ASSIGN, "'='"))
     return NULL;
   s->as.let.init = parse_expr(p);
@@ -533,10 +608,12 @@ static Stmt *parse_const(Parser *p)
   s->as.konst.name_len = p->current.len;
   if (!expect(p, TOK_IDENT, "constant name"))
     return NULL;
-  if (!expect(p, TOK_COLON, "':'"))
-    return NULL;
-  if (!parse_type(p, &s->as.konst.type))
-    return NULL;
+  s->as.konst.type = type_prim(TYPE_UNKNOWN);
+  if (match(p, TOK_COLON))
+  {
+    if (!parse_type(p, &s->as.konst.type))
+      return NULL;
+  }
   if (!expect(p, TOK_ASSIGN, "'='"))
     return NULL;
   s->as.konst.init = parse_expr(p);
@@ -809,7 +886,7 @@ static FnDecl parse_fn(Parser *p)
   }
   f.param_count = pcount;
 
-  f.return_type = TYPE_VOID;
+  f.return_type = type_prim(TYPE_VOID);
   if (match(p, TOK_ARROW))
   {
     if (!parse_type(p, &f.return_type))
@@ -910,7 +987,7 @@ static ExternDecl parse_extern(Parser *p)
   }
   e.param_count = pcount;
 
-  e.return_type = TYPE_VOID;
+  e.return_type = type_prim(TYPE_VOID);
   if (match(p, TOK_ARROW))
   {
     if (!parse_type(p, &e.return_type))
@@ -1012,41 +1089,74 @@ void parser_free(Parser *p)
   free(p->arena);
 }
 
-static const char *type_name(TypeKind t)
+static void format_type(char *buf, size_t cap, Type t)
 {
-  switch (t)
+  if (t.kind == TYPE_ARRAY)
+  {
+    char elem[96];
+    format_type(elem, sizeof elem, t.elem ? *t.elem : type_prim(TYPE_UNKNOWN));
+    snprintf(buf, cap, "[%s; %lld]", elem, t.len);
+    return;
+  }
+  const char *name;
+  switch (t.kind)
   {
     case TYPE_I8:
-      return "i8";
+      name = "i8";
+      break;
     case TYPE_I16:
-      return "i16";
+      name = "i16";
+      break;
     case TYPE_I32:
-      return "i32";
+      name = "i32";
+      break;
     case TYPE_I64:
-      return "i64";
+      name = "i64";
+      break;
     case TYPE_U8:
-      return "u8";
+      name = "u8";
+      break;
     case TYPE_U16:
-      return "u16";
+      name = "u16";
+      break;
     case TYPE_U32:
-      return "u32";
+      name = "u32";
+      break;
     case TYPE_U64:
-      return "u64";
+      name = "u64";
+      break;
     case TYPE_F32:
-      return "f32";
+      name = "f32";
+      break;
     case TYPE_F64:
-      return "f64";
+      name = "f64";
+      break;
     case TYPE_BOOL:
-      return "bool";
+      name = "bool";
+      break;
     case TYPE_STR:
-      return "str";
+      name = "str";
+      break;
     case TYPE_PTR:
-      return "ptr";
+      name = "ptr";
+      break;
     case TYPE_VOID:
-      return "void";
+      name = "void";
+      break;
     default:
-      return "?";
+      name = "?";
+      break;
   }
+  snprintf(buf, cap, "%s", name);
+}
+
+static const char *type_name(Type t)
+{
+  static char bufs[8][128];
+  static int i;
+  char *buf = bufs[i++ & 7];
+  format_type(buf, 128, t);
+  return buf;
 }
 
 static const char *op_name(TokenKind k)
@@ -1118,6 +1228,11 @@ static void dump_expr(const Expr *e, int depth)
       break;
     case EXPR_BOOL_LIT:
       printf("BoolLit %s\n", e->as.bval ? "true" : "false");
+      break;
+    case EXPR_ARRAY_LIT:
+      printf("ArrayLit\n");
+      for (int i = 0; i < e->as.array.count; i++)
+        dump_expr(e->as.array.elems[i], depth + 1);
       break;
     case EXPR_IDENT:
       printf("Ident %.*s\n", e->as.sval.len, e->as.sval.ptr);

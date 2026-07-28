@@ -39,66 +39,90 @@ static void mkdir_p(const char *path)
 
 /* IR type strings */
 
-static const char *ir_type(TypeKind t)
+static void ir_type_into(char *buf, size_t cap, Type t)
 {
-  switch (t)
+  if (t.kind == TYPE_ARRAY)
+  {
+    char elem[128];
+    ir_type_into(elem, sizeof elem, t.elem ? *t.elem : type_prim(TYPE_I32));
+    snprintf(buf, cap, "[%lld x %s]", t.len, elem);
+    return;
+  }
+  const char *s;
+  switch (t.kind)
   {
     case TYPE_I8:
-      return "i8";
-    case TYPE_I16:
-      return "i16";
-    case TYPE_I32:
-      return "i32";
-    case TYPE_I64:
-      return "i64";
     case TYPE_U8:
-      return "i8";
+      s = "i8";
+      break;
+    case TYPE_I16:
     case TYPE_U16:
-      return "i16";
+      s = "i16";
+      break;
+    case TYPE_I32:
     case TYPE_U32:
-      return "i32";
+      s = "i32";
+      break;
+    case TYPE_I64:
     case TYPE_U64:
-      return "i64";
+      s = "i64";
+      break;
     case TYPE_F32:
-      return "float";
+      s = "float";
+      break;
     case TYPE_F64:
-      return "double";
+      s = "double";
+      break;
     case TYPE_BOOL:
-      return "i1";
+      s = "i1";
+      break;
     case TYPE_STR:
-      return "ptr";
     case TYPE_PTR:
-      return "ptr";
+      s = "ptr";
+      break;
     case TYPE_VOID:
-      return "void";
+      s = "void";
+      break;
     default:
-      return "i32";
+      s = "i32";
+      break;
   }
+  snprintf(buf, cap, "%s", s);
 }
 
-static int type_is_float(TypeKind t)
+static const char *ir_type(Type t)
 {
-  return t == TYPE_F32 || t == TYPE_F64;
+  static char bufs[8][160];
+  static int i;
+  char *buf = bufs[i++ & 7];
+  ir_type_into(buf, 160, t);
+  return buf;
 }
 
-static int type_is_unsigned(TypeKind t)
+static int type_is_float(Type t)
 {
-  return t == TYPE_U8 || t == TYPE_U16 || t == TYPE_U32 || t == TYPE_U64;
+  return t.kind == TYPE_F32 || t.kind == TYPE_F64;
 }
 
-static int is_signed_int(TypeKind t)
+static int type_is_unsigned(Type t)
 {
-  return t >= TYPE_I8 && t <= TYPE_I64;
+  return t.kind == TYPE_U8 || t.kind == TYPE_U16 || t.kind == TYPE_U32 || t.kind == TYPE_U64;
 }
 
-static int is_repr_cast(TypeKind from, TypeKind to)
+static int is_signed_int(Type t)
 {
-  return (from == TYPE_PTR && to == TYPE_STR) || (from == TYPE_STR && to == TYPE_PTR);
+  return t.kind >= TYPE_I8 && t.kind <= TYPE_I64;
 }
 
-static int int_bit_width(TypeKind t)
+static int is_repr_cast(Type from, Type to)
 {
-  switch (t)
+  return (from.kind == TYPE_PTR && to.kind == TYPE_STR) ||
+         (from.kind == TYPE_STR && to.kind == TYPE_PTR);
+}
+
+static int int_bit_width(Type t)
+{
+  switch (t.kind)
   {
     case TYPE_I8:
       return 8;
@@ -128,7 +152,7 @@ typedef struct
   char *name; /* owned */
   int name_len;
   int reg; /* alloca result: %N */
-  TypeKind type;
+  Type type;
 } Local;
 
 /* Loop frame for break/continue */
@@ -229,7 +253,7 @@ static int new_label(CG *cg)
 }
 
 /* Push a local variable, return its alloca register */
-static int push_local(CG *cg, const char *name, int name_len, TypeKind type, int alloca_reg)
+static int push_local(CG *cg, const char *name, int name_len, Type type, int alloca_reg)
 {
   if (cg->local_count == cg->local_cap)
   {
@@ -360,9 +384,9 @@ static char *mangle(const char *concept, const char *fn, int fn_len)
 
 /* forward declarations */
 
-static int emit_expr(CG *cg, const Expr *e, TypeKind hint);
+static int emit_expr(CG *cg, const Expr *e, Type hint);
 static int emit_ptr_index_addr(CG *cg, int ptr_reg, const Expr *index_expr);
-static TypeKind infer_type(CG *cg, const Expr *e);
+static Type infer_type(CG *cg, const Expr *e);
 static void emit_block(CG *cg, const Block *block, const FnDecl *fn);
 static void emit_stmt(CG *cg, const Stmt *s, const FnDecl *fn);
 
@@ -371,18 +395,18 @@ static void emit_stmt(CG *cg, const Stmt *s, const FnDecl *fn);
 /* Emit a call expression, return result register (0 for void).
    params/param_count: fixed parameter types (from FnDecl or ExternDecl).
    is_variadic: if set, args beyond param_count use default promotion types. */
-static int emit_call(CG *cg, const char *mangled_name, TypeKind ret, const ArgList *args,
+static int emit_call(CG *cg, const char *mangled_name, Type ret, const ArgList *args,
                      const Param *params, int param_count, int is_variadic)
 {
   int arg_regs[64];
-  TypeKind arg_types[64];
+  Type arg_types[64];
   int n = args->count < 64 ? args->count : 64;
   int fixed = param_count;
   (void) is_variadic;
 
   for (int i = 0; i < n; i++)
   {
-    TypeKind hint = (i < fixed) ? params[i].type : TYPE_UNKNOWN;
+    Type hint = (i < fixed) ? params[i].type : type_prim(TYPE_UNKNOWN);
     arg_regs[i] = emit_expr(cg, args->args[i], hint);
     /* For variadic args beyond fixed params, default to i32 for ints,
        double for floats — mirrors C's default argument promotions */
@@ -391,14 +415,14 @@ static int emit_call(CG *cg, const char *mangled_name, TypeKind ret, const ArgLi
     else
     {
       arg_types[i] = infer_type(cg, args->args[i]);
-      if (arg_types[i] == TYPE_UNKNOWN || arg_types[i] == TYPE_I32)
-        arg_types[i] = TYPE_I32;
-      else if (arg_types[i] == TYPE_F32)
-        arg_types[i] = TYPE_F64;
+      if (arg_types[i].kind == TYPE_UNKNOWN || arg_types[i].kind == TYPE_I32)
+        arg_types[i] = type_prim(TYPE_I32);
+      else if (arg_types[i].kind == TYPE_F32)
+        arg_types[i] = type_prim(TYPE_F64);
     }
   }
 
-  if (ret == TYPE_VOID)
+  if (ret.kind == TYPE_VOID)
     emit(cg, "  call void @%s(", mangled_name);
   else
   {
@@ -475,20 +499,29 @@ static const FnDecl *find_fn_decl_qual(const CG *cg, int tgt_concept_idx, const 
   return NULL;
 }
 
-static TypeKind infer_type(CG *cg, const Expr *e)
+static Type infer_type(CG *cg, const Expr *e)
 {
   if (!e)
-    return TYPE_UNKNOWN;
+    return type_prim(TYPE_UNKNOWN);
   switch (e->kind)
   {
     case EXPR_INT_LIT:
-      return TYPE_I32;
+      return type_prim(TYPE_I32);
     case EXPR_FLOAT_LIT:
-      return TYPE_F64;
+      return type_prim(TYPE_F64);
     case EXPR_STR_LIT:
-      return TYPE_STR;
+      return type_prim(TYPE_STR);
     case EXPR_BOOL_LIT:
-      return TYPE_BOOL;
+      return type_prim(TYPE_BOOL);
+    case EXPR_ARRAY_LIT:
+    {
+      if (e->as.array.count == 0)
+        return type_prim(TYPE_UNKNOWN);
+      Type elem = infer_type(cg, e->as.array.elems[0]);
+      Type *storage = xmalloc(sizeof(Type));
+      *storage = elem;
+      return type_array(storage, e->as.array.count);
+    }
     case EXPR_IDENT:
     {
       const Local *l = find_local(cg, e->as.ident.ptr, e->as.ident.len);
@@ -497,46 +530,61 @@ static TypeKind infer_type(CG *cg, const Expr *e)
       const ExternDecl *ex = find_extern_decl(cg, e->as.ident.ptr, e->as.ident.len);
       if (ex && ex->kind == EXTERN_VAR)
         return ex->return_type;
-      return TYPE_UNKNOWN;
+      return type_prim(TYPE_UNKNOWN);
     }
     case EXPR_CALL:
     {
+      if (e->as.call.name_len == 3 && memcmp(e->as.call.name, "len", 3) == 0 &&
+          !find_fn_decl(cg, e->as.call.name, e->as.call.name_len) &&
+          !find_extern_decl(cg, e->as.call.name, e->as.call.name_len))
+        return type_prim(TYPE_I32);
       const FnDecl *f = find_fn_decl(cg, e->as.call.name, e->as.call.name_len);
       if (f)
         return f->return_type;
       const ExternDecl *ex = find_extern_decl(cg, e->as.call.name, e->as.call.name_len);
       if (ex)
         return ex->return_type;
-      return TYPE_UNKNOWN;
+      return type_prim(TYPE_UNKNOWN);
     }
     case EXPR_QUAL_CALL:
     {
       int tgt =
           project_concept_index(cg->proj, e->as.qual_call.concept, e->as.qual_call.concept_len);
       if (tgt < 0)
-        return TYPE_UNKNOWN;
+        return type_prim(TYPE_UNKNOWN);
       const FnDecl *f = find_fn_decl_qual(cg, tgt, e->as.qual_call.name, e->as.qual_call.name_len);
-      return f ? f->return_type : TYPE_UNKNOWN;
+      return f ? f->return_type : type_prim(TYPE_UNKNOWN);
     }
     case EXPR_ASSIGN:
       return infer_type(cg, e->as.assign.value);
     case EXPR_UPDATE:
       return infer_type(cg, e->as.update.target);
     case EXPR_INDEX:
-      return TYPE_I32;
+    {
+      Type target = infer_type(cg, e->as.index.target);
+      if (target.kind == TYPE_ARRAY && target.elem)
+        return *target.elem;
+      return type_prim(TYPE_I32);
+    }
     case EXPR_UNARY:
       return infer_type(cg, e->as.unary.operand);
     case EXPR_BINARY:
+    {
+      TokenKind op = e->as.binary.op;
+      if (op == TOK_EQ || op == TOK_NEQ || op == TOK_LT || op == TOK_GT || op == TOK_LTE ||
+          op == TOK_GTE || op == TOK_AND || op == TOK_OR)
+        return type_prim(TYPE_BOOL);
       return infer_type(cg, e->as.binary.left);
+    }
     case EXPR_CAST:
       return e->as.cast.target_type;
   }
-  return TYPE_UNKNOWN;
+  return type_prim(TYPE_UNKNOWN);
 }
 
-static int emit_int_cast(CG *cg, int reg, TypeKind from, TypeKind to)
+static int emit_int_cast(CG *cg, int reg, Type from, Type to)
 {
-  if (from == to)
+  if (from.kind == to.kind)
     return reg;
   int from_w = int_bit_width(from);
   int to_w = int_bit_width(to);
@@ -548,9 +596,9 @@ static int emit_int_cast(CG *cg, int reg, TypeKind from, TypeKind to)
   return r;
 }
 
-static const char *str_to_int_rt(TypeKind t)
+static const char *str_to_int_rt(Type t)
 {
-  switch (t)
+  switch (t.kind)
   {
     case TYPE_I8:
       return "rigg_str_to_i8";
@@ -565,9 +613,9 @@ static const char *str_to_int_rt(TypeKind t)
   }
 }
 
-static const char *int_to_str_rt(TypeKind t)
+static const char *int_to_str_rt(Type t)
 {
-  switch (t)
+  switch (t.kind)
   {
     case TYPE_I8:
       return "rigg_i8_to_str";
@@ -584,9 +632,9 @@ static const char *int_to_str_rt(TypeKind t)
 
 static int emit_cast(CG *cg, const Expr *e)
 {
-  TypeKind dst = e->as.cast.target_type;
-  TypeKind src = infer_type(cg, e->as.cast.expr);
-  int operand = emit_expr(cg, e->as.cast.expr, src != TYPE_UNKNOWN ? src : dst);
+  Type dst = e->as.cast.target_type;
+  Type src = infer_type(cg, e->as.cast.expr);
+  int operand = emit_expr(cg, e->as.cast.expr, src.kind != TYPE_UNKNOWN ? src : dst);
 
   if (is_repr_cast(src, dst))
     return operand;
@@ -594,7 +642,7 @@ static int emit_cast(CG *cg, const Expr *e)
   if (is_signed_int(src) && is_signed_int(dst))
     return emit_int_cast(cg, operand, src, dst);
 
-  if (src == TYPE_STR && is_signed_int(dst))
+  if (src.kind == TYPE_STR && is_signed_int(dst))
   {
     const char *fn = str_to_int_rt(dst);
     int r = new_reg(cg);
@@ -602,7 +650,7 @@ static int emit_cast(CG *cg, const Expr *e)
     return r;
   }
 
-  if (is_signed_int(src) && dst == TYPE_STR)
+  if (is_signed_int(src) && dst.kind == TYPE_STR)
   {
     const char *fn = int_to_str_rt(src);
     int r = new_reg(cg);
@@ -610,57 +658,55 @@ static int emit_cast(CG *cg, const Expr *e)
     return r;
   }
 
-  if (src == TYPE_F32 && dst == TYPE_STR)
+  if (src.kind == TYPE_F32 && dst.kind == TYPE_STR)
   {
     int r = new_reg(cg);
     emit(cg, "  %%%d = call ptr @rigg_f32_to_str(float %%%d)\n", r, operand);
     return r;
   }
 
-  if (src == TYPE_F64 && dst == TYPE_STR)
+  if (src.kind == TYPE_F64 && dst.kind == TYPE_STR)
   {
     int r = new_reg(cg);
     emit(cg, "  %%%d = call ptr @rigg_f64_to_str(double %%%d)\n", r, operand);
     return r;
   }
 
-  if (src == TYPE_STR && dst == TYPE_F64)
+  if (src.kind == TYPE_STR && dst.kind == TYPE_F64)
   {
     int r = new_reg(cg);
     emit(cg, "  %%%d = call double @rigg_str_to_f64(ptr %%%d)\n", r, operand);
     return r;
   }
-  if (src == TYPE_STR && dst == TYPE_F32)
+  if (src.kind == TYPE_STR && dst.kind == TYPE_F32)
   {
     int r = new_reg(cg);
     emit(cg, "  %%%d = call float @rigg_str_to_f32(ptr %%%d)\n", r, operand);
     return r;
   }
 
-  if (src == TYPE_BOOL && dst == TYPE_STR)
+  if (src.kind == TYPE_BOOL && dst.kind == TYPE_STR)
   {
     int r = new_reg(cg);
     emit(cg, "  %%%d = call ptr @rigg_bool_to_str(i1 %%%d)\n", r, operand);
     return r;
   }
 
-  if (src == TYPE_STR && dst == TYPE_BOOL)
+  if (src.kind == TYPE_STR && dst.kind == TYPE_BOOL)
   {
     int r = new_reg(cg);
     emit(cg, "  %%%d = call i1 @rigg_str_to_bool(ptr %%%d)\n", r, operand);
     return r;
   }
 
-  /* integer -> ptr */
-  if (is_signed_int(src) && dst == TYPE_PTR)
+  if (is_signed_int(src) && dst.kind == TYPE_PTR)
   {
     int r = new_reg(cg);
     emit(cg, "  %%%d = inttoptr %s %%%d to ptr\n", r, ir_type(src), operand);
     return r;
   }
 
-  /* ptr -> integer */
-  if (src == TYPE_PTR && is_signed_int(dst))
+  if (src.kind == TYPE_PTR && is_signed_int(dst))
   {
     int r = new_reg(cg);
     emit(cg, "  %%%d = ptrtoint ptr %%%d to %s\n", r, operand, ir_type(dst));
@@ -670,10 +716,122 @@ static int emit_cast(CG *cg, const Expr *e)
   return operand;
 }
 
+static int emit_as_i32(CG *cg, const Expr *index_expr);
+static void emit_array_bounds_check(CG *cg, int index_reg, long long len);
+static int emit_array_addr(CG *cg, const Expr *e, Type arr_ty);
+static int emit_array_elem_addr(CG *cg, Type arr_ty, int arr_ptr, const Expr *index_expr);
+static int emit_array_eq(CG *cg, Type t, int lhs, int rhs);
+
+static void emit_array_bounds_check(CG *cg, int index_reg, long long len)
+{
+  if (!cg->bounds_check)
+    return;
+  int ge0 = new_reg(cg);
+  emit(cg, "  %%%d = icmp sge i32 %%%d, 0\n", ge0, index_reg);
+  int lt = new_reg(cg);
+  emit(cg, "  %%%d = icmp slt i32 %%%d, %lld\n", lt, index_reg, len);
+  int ok = new_reg(cg);
+  emit(cg, "  %%%d = and i1 %%%d, %%%d\n", ok, ge0, lt);
+  int fail = new_label(cg);
+  int cont = new_label(cg);
+  emit(cg, "  br i1 %%%d, label %%L%d, label %%L%d\n", ok, cont, fail);
+  emit(cg, "L%d:\n", fail);
+  emit(cg, "  call void @abort()\n");
+  emit(cg, "  unreachable\n");
+  emit(cg, "L%d:\n", cont);
+}
+
+static int emit_array_elem_addr(CG *cg, Type arr_ty, int arr_ptr, const Expr *index_expr)
+{
+  int index_reg = emit_as_i32(cg, index_expr);
+  emit_array_bounds_check(cg, index_reg, arr_ty.len);
+  int addr = new_reg(cg);
+  emit(cg, "  %%%d = getelementptr inbounds %s, ptr %%%d, i32 0, i32 %%%d\n", addr, ir_type(arr_ty),
+       arr_ptr, index_reg);
+  return addr;
+}
+
+static int emit_array_addr(CG *cg, const Expr *e, Type arr_ty)
+{
+  if (e->kind == EXPR_IDENT)
+  {
+    const Local *l = find_local(cg, e->as.ident.ptr, e->as.ident.len);
+    if (l)
+      return l->reg;
+  }
+  if (e->kind == EXPR_INDEX)
+  {
+    Type outer = infer_type(cg, e->as.index.target);
+    if (outer.kind == TYPE_ARRAY)
+    {
+      int outer_addr = emit_array_addr(cg, e->as.index.target, outer);
+      return emit_array_elem_addr(cg, outer, outer_addr, e->as.index.index);
+    }
+  }
+  /* Materialize rvalue arrays into a temporary */
+  int val = emit_expr(cg, e, arr_ty);
+  int tmp = new_reg(cg);
+  emit(cg, "  %%%d = alloca %s\n", tmp, ir_type(arr_ty));
+  emit(cg, "  store %s %%%d, ptr %%%d\n", ir_type(arr_ty), val, tmp);
+  return tmp;
+}
+
+static int emit_array_eq(CG *cg, Type t, int lhs, int rhs)
+{
+  if (t.kind != TYPE_ARRAY || !t.elem)
+  {
+    int r = new_reg(cg);
+    emit(cg, "  %%%d = icmp eq %s %%%d, %%%d\n", r, ir_type(t), lhs, rhs);
+    return r;
+  }
+  int acc = -1;
+  Type elem = *t.elem;
+  for (long long i = 0; i < t.len; i++)
+  {
+    int le = new_reg(cg);
+    emit(cg, "  %%%d = extractvalue %s %%%d, %lld\n", le, ir_type(t), lhs, i);
+    int re = new_reg(cg);
+    emit(cg, "  %%%d = extractvalue %s %%%d, %lld\n", re, ir_type(t), rhs, i);
+    int eq;
+    if (elem.kind == TYPE_ARRAY)
+      eq = emit_array_eq(cg, elem, le, re);
+    else if (elem.kind == TYPE_STR)
+    {
+      eq = new_reg(cg);
+      emit(cg, "  %%%d = call i1 @rigg_str_eq(ptr %%%d, ptr %%%d)\n", eq, le, re);
+    }
+    else if (type_is_float(elem))
+    {
+      eq = new_reg(cg);
+      emit(cg, "  %%%d = fcmp oeq %s %%%d, %%%d\n", eq, ir_type(elem), le, re);
+    }
+    else
+    {
+      eq = new_reg(cg);
+      emit(cg, "  %%%d = icmp eq %s %%%d, %%%d\n", eq, ir_type(elem), le, re);
+    }
+    if (acc < 0)
+      acc = eq;
+    else
+    {
+      int n = new_reg(cg);
+      emit(cg, "  %%%d = and i1 %%%d, %%%d\n", n, acc, eq);
+      acc = n;
+    }
+  }
+  if (acc < 0)
+  {
+    /* empty arrays are equal */
+    acc = new_reg(cg);
+    emit(cg, "  %%%d = add i1 0, 1\n", acc);
+  }
+  return acc;
+}
+
 /* Emit an expression; returns the register holding the result.
    For void expressions returns 0.
    hint: expected type at use site (used for integer literal width). */
-static int emit_expr(CG *cg, const Expr *e, TypeKind hint)
+static int emit_expr(CG *cg, const Expr *e, Type hint)
 {
   if (!e)
     return 0;
@@ -682,7 +840,7 @@ static int emit_expr(CG *cg, const Expr *e, TypeKind hint)
   {
     case EXPR_INT_LIT:
     {
-      TypeKind t = (hint != TYPE_UNKNOWN && hint != TYPE_VOID) ? hint : TYPE_I32;
+      Type t = (hint.kind != TYPE_UNKNOWN && hint.kind != TYPE_VOID) ? hint : type_prim(TYPE_I32);
       int r = new_reg(cg);
       emit(cg, "  %%%d = add %s 0, %lld\n", r, ir_type(t), e->as.ival);
       return r;
@@ -690,7 +848,7 @@ static int emit_expr(CG *cg, const Expr *e, TypeKind hint)
 
     case EXPR_FLOAT_LIT:
     {
-      TypeKind t = (hint == TYPE_F32) ? TYPE_F32 : TYPE_F64;
+      Type t = (hint.kind == TYPE_F32) ? type_prim(TYPE_F32) : type_prim(TYPE_F64);
       int r = new_reg(cg);
       emit(cg, "  %%%d = fadd %s 0.0, %g\n", r, ir_type(t), e->as.fval);
       return r;
@@ -713,6 +871,38 @@ static int emit_expr(CG *cg, const Expr *e, TypeKind hint)
       return r;
     }
 
+    case EXPR_ARRAY_LIT:
+    {
+      Type t = hint;
+      if (t.kind != TYPE_ARRAY)
+        t = infer_type(cg, e);
+      if (t.kind != TYPE_ARRAY || !t.elem)
+        return 0;
+      Type elem = *t.elem;
+      int r = -1;
+      if (t.len == 0)
+      {
+        int tmp = new_reg(cg);
+        emit(cg, "  %%%d = alloca %s\n", tmp, ir_type(t));
+        r = new_reg(cg);
+        emit(cg, "  %%%d = load %s, ptr %%%d\n", r, ir_type(t), tmp);
+        return r;
+      }
+      for (int i = 0; i < e->as.array.count; i++)
+      {
+        int ev = emit_expr(cg, e->as.array.elems[i], elem);
+        int n = new_reg(cg);
+        if (i == 0)
+          emit(cg, "  %%%d = insertvalue %s undef, %s %%%d, %d\n", n, ir_type(t), ir_type(elem), ev,
+               i);
+        else
+          emit(cg, "  %%%d = insertvalue %s %%%d, %s %%%d, %d\n", n, ir_type(t), r, ir_type(elem),
+               ev, i);
+        r = n;
+      }
+      return r;
+    }
+
     case EXPR_IDENT:
     {
       const Local *l = find_local(cg, e->as.ident.ptr, e->as.ident.len);
@@ -720,7 +910,6 @@ static int emit_expr(CG *cg, const Expr *e, TypeKind hint)
       {
         int r = new_reg(cg);
         emit(cg, "  %%%d = load %s, ptr %%%d\n", r, ir_type(l->type), l->reg);
-
         return r;
       }
       const ExternDecl *ex = find_extern_decl(cg, e->as.ident.ptr, e->as.ident.len);
@@ -731,7 +920,7 @@ static int emit_expr(CG *cg, const Expr *e, TypeKind hint)
              ex->name);
         return r;
       }
-      return 0; /* sema already caught this */
+      return 0;
     }
 
     case EXPR_ASSIGN:
@@ -748,9 +937,19 @@ static int emit_expr(CG *cg, const Expr *e, TypeKind hint)
       }
       if (target->kind == EXPR_INDEX)
       {
-        int ptr = emit_expr(cg, target->as.index.target, TYPE_PTR);
+        Type target_ty = infer_type(cg, target->as.index.target);
+        if (target_ty.kind == TYPE_ARRAY && target_ty.elem)
+        {
+          int arr_addr = emit_array_addr(cg, target->as.index.target, target_ty);
+          int elem_addr = emit_array_elem_addr(cg, target_ty, arr_addr, target->as.index.index);
+          Type elem = *target_ty.elem;
+          int val = emit_expr(cg, e->as.assign.value, elem);
+          emit(cg, "  store %s %%%d, ptr %%%d\n", ir_type(elem), val, elem_addr);
+          return val;
+        }
+        int ptr = emit_expr(cg, target->as.index.target, type_prim(TYPE_PTR));
         int addr = emit_ptr_index_addr(cg, ptr, target->as.index.index);
-        int val = emit_expr(cg, e->as.assign.value, TYPE_I32);
+        int val = emit_expr(cg, e->as.assign.value, type_prim(TYPE_I32));
         int byte = new_reg(cg);
         emit(cg, "  %%%d = trunc i32 %%%d to i8\n", byte, val);
         emit(cg, "  store i8 %%%d, ptr %%%d\n", byte, addr);
@@ -767,7 +966,7 @@ static int emit_expr(CG *cg, const Expr *e, TypeKind hint)
       const Local *l = find_local(cg, target->as.ident.ptr, target->as.ident.len);
       if (!l)
         return 0;
-      int cur = emit_expr(cg, target, TYPE_I32);
+      int cur = emit_expr(cg, target, type_prim(TYPE_I32));
       int next = new_reg(cg);
       if (e->as.update.op == TOK_PLUS_PLUS)
         emit(cg, "  %%%d = add i32 %%%d, 1\n", next, cur);
@@ -779,7 +978,17 @@ static int emit_expr(CG *cg, const Expr *e, TypeKind hint)
 
     case EXPR_INDEX:
     {
-      int ptr = emit_expr(cg, e->as.index.target, TYPE_PTR);
+      Type target_ty = infer_type(cg, e->as.index.target);
+      if (target_ty.kind == TYPE_ARRAY && target_ty.elem)
+      {
+        int arr_addr = emit_array_addr(cg, e->as.index.target, target_ty);
+        int elem_addr = emit_array_elem_addr(cg, target_ty, arr_addr, e->as.index.index);
+        Type elem = *target_ty.elem;
+        int r = new_reg(cg);
+        emit(cg, "  %%%d = load %s, ptr %%%d\n", r, ir_type(elem), elem_addr);
+        return r;
+      }
+      int ptr = emit_expr(cg, e->as.index.target, type_prim(TYPE_PTR));
       int addr = emit_ptr_index_addr(cg, ptr, e->as.index.index);
       int byte = new_reg(cg);
       emit(cg, "  %%%d = load i8, ptr %%%d\n", byte, addr);
@@ -792,8 +1001,7 @@ static int emit_expr(CG *cg, const Expr *e, TypeKind hint)
     {
       int operand = emit_expr(cg, e->as.unary.operand, hint);
       int r = new_reg(cg);
-      /* Infer operand type from hint or default to i32 */
-      TypeKind t = (hint != TYPE_UNKNOWN && hint != TYPE_VOID) ? hint : TYPE_I32;
+      Type t = (hint.kind != TYPE_UNKNOWN && hint.kind != TYPE_VOID) ? hint : type_prim(TYPE_I32);
       if (e->as.unary.op == TOK_BANG)
       {
         emit(cg, "  %%%d = xor i1 %%%d, 1\n", r, operand);
@@ -810,39 +1018,51 @@ static int emit_expr(CG *cg, const Expr *e, TypeKind hint)
 
     case EXPR_BINARY:
     {
-      /* TODO: short-circuit evaluation for && and || */
       TokenKind op = e->as.binary.op;
       int is_cmp = op == TOK_EQ || op == TOK_NEQ || op == TOK_LT || op == TOK_GT || op == TOK_LTE ||
                    op == TOK_GTE;
       int is_logic = op == TOK_AND || op == TOK_OR;
 
-      /* Comparisons yield i1 but compare operands at their own type; logical ops use i1. */
-      TypeKind t;
-      TypeKind emit_hint;
+      Type t;
+      Type emit_hint;
       if (is_cmp)
       {
         t = infer_type(cg, e->as.binary.left);
-        if (t == TYPE_UNKNOWN)
-          t = TYPE_I32;
+        if (t.kind == TYPE_UNKNOWN)
+          t = type_prim(TYPE_I32);
         emit_hint = t;
       }
       else if (is_logic)
       {
-        t = TYPE_BOOL;
-        emit_hint = TYPE_BOOL;
+        t = type_prim(TYPE_BOOL);
+        emit_hint = type_prim(TYPE_BOOL);
       }
       else
       {
         t = infer_type(cg, e->as.binary.left);
-        if (t == TYPE_UNKNOWN)
-          t = (hint != TYPE_UNKNOWN && hint != TYPE_VOID && hint != TYPE_BOOL) ? hint : TYPE_I32;
+        if (t.kind == TYPE_UNKNOWN)
+          t = (hint.kind != TYPE_UNKNOWN && hint.kind != TYPE_VOID && hint.kind != TYPE_BOOL)
+                  ? hint
+                  : type_prim(TYPE_I32);
         emit_hint = t;
       }
 
       int lhs = emit_expr(cg, e->as.binary.left, emit_hint);
       int rhs = emit_expr(cg, e->as.binary.right, emit_hint);
-      int r = new_reg(cg);
 
+      if ((op == TOK_EQ || op == TOK_NEQ) && t.kind == TYPE_ARRAY)
+      {
+        int eq = emit_array_eq(cg, t, lhs, rhs);
+        if (op == TOK_NEQ)
+        {
+          int r = new_reg(cg);
+          emit(cg, "  %%%d = xor i1 %%%d, 1\n", r, eq);
+          return r;
+        }
+        return eq;
+      }
+
+      int r = new_reg(cg);
       int is_fp = type_is_float(t);
       int is_uns = type_is_unsigned(t);
 
@@ -910,13 +1130,13 @@ static int emit_expr(CG *cg, const Expr *e, TypeKind hint)
               emit(cg, "  %%%d = srem %s %%%d, %%%d\n", r, ir_type(t), lhs, rhs);
             break;
           case TOK_EQ:
-            if (t == TYPE_STR)
+            if (t.kind == TYPE_STR)
               emit(cg, "  %%%d = call i1 @rigg_str_eq(ptr %%%d, ptr %%%d)\n", r, lhs, rhs);
             else
               emit(cg, "  %%%d = icmp eq  %s %%%d, %%%d\n", r, ir_type(t), lhs, rhs);
             break;
           case TOK_NEQ:
-            if (t == TYPE_STR)
+            if (t.kind == TYPE_STR)
               emit(cg, "  %%%d = call i1 @rigg_str_ne(ptr %%%d, ptr %%%d)\n", r, lhs, rhs);
             else
               emit(cg, "  %%%d = icmp ne  %s %%%d, %%%d\n", r, ir_type(t), lhs, rhs);
@@ -960,15 +1180,28 @@ static int emit_expr(CG *cg, const Expr *e, TypeKind hint)
 
     case EXPR_CALL:
     {
+      /* Builtin len(array) */
+      if (e->as.call.name_len == 3 && memcmp(e->as.call.name, "len", 3) == 0 &&
+          !find_fn_decl(cg, e->as.call.name, e->as.call.name_len) &&
+          !find_extern_decl(cg, e->as.call.name, e->as.call.name_len))
+      {
+        Type arg_ty = infer_type(cg, e->as.call.args.args[0]);
+        /* Still evaluate the argument for side effects */
+        emit_expr(cg, e->as.call.args.args[0], arg_ty);
+        int r = new_reg(cg);
+        long long n = arg_ty.kind == TYPE_ARRAY ? arg_ty.len : 0;
+        emit(cg, "  %%%d = add i32 0, %lld\n", r, n);
+        return r;
+      }
+
       const FnDecl *decl = find_fn_decl(cg, e->as.call.name, e->as.call.name_len);
       const ExternDecl *ext = NULL;
       if (!decl)
         ext = find_extern_decl(cg, e->as.call.name, e->as.call.name_len);
-      TypeKind ret = decl ? decl->return_type : (ext ? ext->return_type : TYPE_VOID);
+      Type ret = decl ? decl->return_type : (ext ? ext->return_type : type_prim(TYPE_VOID));
       int is_variadic = ext ? ext->is_variadic : 0;
       const char *cname = cg->proj->concepts[cg->concept_idx].name;
       char *mangled = mangle(cname, e->as.call.name, e->as.call.name_len);
-      /* Extern functions use their real name, not mangled */
       if (ext)
       {
         free(mangled);
@@ -990,7 +1223,7 @@ static int emit_expr(CG *cg, const Expr *e, TypeKind hint)
       const FnDecl *decl =
           tgt >= 0 ? find_fn_decl_qual(cg, tgt, e->as.qual_call.name, e->as.qual_call.name_len)
                    : NULL;
-      TypeKind ret = decl ? decl->return_type : TYPE_VOID;
+      Type ret = decl ? decl->return_type : type_prim(TYPE_VOID);
       const char *cname = tgt >= 0 ? cg->proj->concepts[tgt].name : "";
       char *mangled = mangle(cname, e->as.qual_call.name, e->as.qual_call.name_len);
       int r = emit_call(cg, mangled, ret, &e->as.qual_call.args, decl ? decl->params : NULL,
@@ -1009,9 +1242,9 @@ static int emit_expr(CG *cg, const Expr *e, TypeKind hint)
 
 static int emit_as_i32(CG *cg, const Expr *index_expr)
 {
-  TypeKind t = infer_type(cg, index_expr);
-  int reg = emit_expr(cg, index_expr, TYPE_I32);
-  if (t == TYPE_UNKNOWN || t == TYPE_I32)
+  Type t = infer_type(cg, index_expr);
+  int reg = emit_expr(cg, index_expr, type_prim(TYPE_I32));
+  if (t.kind == TYPE_UNKNOWN || t.kind == TYPE_I32)
     return reg;
   int r = new_reg(cg);
   emit(cg, "  %%%d = trunc %s %%%d to i32\n", r, ir_type(t), reg);
@@ -1107,7 +1340,7 @@ static void emit_stmt(CG *cg, const Stmt *s, const FnDecl *fn)
     {
       const char *name = s->kind == STMT_LET ? s->as.let.name : s->as.konst.name;
       int nlen = s->kind == STMT_LET ? s->as.let.name_len : s->as.konst.name_len;
-      TypeKind type = s->kind == STMT_LET ? s->as.let.type : s->as.konst.type;
+      Type type = s->kind == STMT_LET ? s->as.let.type : s->as.konst.type;
       const Expr *init = s->kind == STMT_LET ? s->as.let.init : s->as.konst.init;
 
       int alloca_reg = new_reg(cg);
@@ -1129,7 +1362,7 @@ static void emit_stmt(CG *cg, const Stmt *s, const FnDecl *fn)
     case STMT_RETURN:
     {
       int val = 0;
-      int has_val = s->as.ret.value && fn->return_type != TYPE_VOID;
+      int has_val = s->as.ret.value && fn->return_type.kind != TYPE_VOID;
       if (has_val)
         val = emit_expr(cg, s->as.ret.value, fn->return_type);
 
@@ -1151,7 +1384,7 @@ static void emit_stmt(CG *cg, const Stmt *s, const FnDecl *fn)
       int end_label = new_label(cg);
       int has_else = s->as.sif.else_block.count > 0;
 
-      int cond = emit_expr(cg, s->as.sif.cond, TYPE_BOOL);
+      int cond = emit_expr(cg, s->as.sif.cond, type_prim(TYPE_BOOL));
       emit(cg, "  br i1 %%%d, label %%L%d, label %%L%d\n", cond, then_label,
            has_else ? else_label : end_label);
 
@@ -1186,13 +1419,12 @@ static void emit_stmt(CG *cg, const Stmt *s, const FnDecl *fn)
       emit(cg, "  br label %%L%d\n", header_label);
 
       emit(cg, "L%d:\n", header_label);
-      int cond = emit_expr(cg, s->as.sfor.cond, TYPE_BOOL);
+      int cond = emit_expr(cg, s->as.sfor.cond, type_prim(TYPE_BOOL));
       emit(cg, "  br i1 %%%d, label %%L%d, label %%L%d\n", cond, body_label, exit_label);
 
       emit(cg, "L%d:\n", body_label);
       /* defer_frame_index is the frame emit_block is about to push */
-      cg->loop_stack[cg->loop_depth++] =
-          (LoopFrame){post_label, exit_label, cg->defer_depth};
+      cg->loop_stack[cg->loop_depth++] = (LoopFrame){post_label, exit_label, cg->defer_depth};
       int body_saved = save_locals(cg);
       emit_block(cg, &s->as.sfor.body, fn);
       restore_locals(cg, body_saved);
@@ -1200,7 +1432,7 @@ static void emit_stmt(CG *cg, const Stmt *s, const FnDecl *fn)
       emit(cg, "  br label %%L%d\n", post_label);
 
       emit(cg, "L%d:\n", post_label);
-      emit_expr(cg, s->as.sfor.post, TYPE_UNKNOWN);
+      emit_expr(cg, s->as.sfor.post, type_prim(TYPE_UNKNOWN));
       emit(cg, "  br label %%L%d\n", header_label);
 
       restore_locals(cg, saved);
@@ -1216,12 +1448,11 @@ static void emit_stmt(CG *cg, const Stmt *s, const FnDecl *fn)
 
       emit(cg, "  br label %%L%d\n", header_label);
       emit(cg, "L%d:\n", header_label);
-      int cond = emit_expr(cg, s->as.swhile.cond, TYPE_BOOL);
+      int cond = emit_expr(cg, s->as.swhile.cond, type_prim(TYPE_BOOL));
       emit(cg, "  br i1 %%%d, label %%L%d, label %%L%d\n", cond, body_label, exit_label);
 
       emit(cg, "L%d:\n", body_label);
-      cg->loop_stack[cg->loop_depth++] =
-          (LoopFrame){header_label, exit_label, cg->defer_depth};
+      cg->loop_stack[cg->loop_depth++] = (LoopFrame){header_label, exit_label, cg->defer_depth};
       int saved = save_locals(cg);
       emit_block(cg, &s->as.swhile.body, fn);
       restore_locals(cg, saved);
@@ -1240,8 +1471,7 @@ static void emit_stmt(CG *cg, const Stmt *s, const FnDecl *fn)
       emit(cg, "  br label %%L%d\n", header_label);
       emit(cg, "L%d:\n", header_label);
 
-      cg->loop_stack[cg->loop_depth++] =
-          (LoopFrame){header_label, exit_label, cg->defer_depth};
+      cg->loop_stack[cg->loop_depth++] = (LoopFrame){header_label, exit_label, cg->defer_depth};
       int saved = save_locals(cg);
       emit_block(cg, &s->as.sloop.body, fn);
       restore_locals(cg, saved);
@@ -1276,7 +1506,7 @@ static void emit_stmt(CG *cg, const Stmt *s, const FnDecl *fn)
       break;
 
     case STMT_EXPR:
-      emit_expr(cg, s->as.sexpr.expr, TYPE_UNKNOWN);
+      emit_expr(cg, s->as.sexpr.expr, type_prim(TYPE_UNKNOWN));
       break;
   }
 }
@@ -1311,7 +1541,8 @@ static void emit_fn(CG *cg, const FnDecl *fn, const char *concept_name)
   /* The C runtime requires main() -> i32 regardless of what the Rigg source
      declares. A void main() in Rigg gets an implicit return 0. */
   int is_entry = strcmp(mangled, "main") == 0;
-  TypeKind ir_ret = (is_entry && fn->return_type == TYPE_VOID) ? TYPE_I32 : fn->return_type;
+  Type ir_ret =
+      (is_entry && fn->return_type.kind == TYPE_VOID) ? type_prim(TYPE_I32) : fn->return_type;
 
   /* Function signature */
   emit(cg, "define %s @%s(", ir_type(ir_ret), mangled);
@@ -1339,7 +1570,7 @@ static void emit_fn(CG *cg, const FnDecl *fn, const char *concept_name)
      For non-void functions sema guarantees all paths return explicitly, so
      this only fires for void functions (or unreachable tails).
      Entry point gets ret i32 0; all other void functions get ret void. */
-  if (fn->return_type == TYPE_VOID)
+  if (fn->return_type.kind == TYPE_VOID)
   {
     if (is_entry)
       emit(cg, "  ret i32 0\n");
@@ -1359,7 +1590,7 @@ static void emit_fn(CG *cg, const FnDecl *fn, const char *concept_name)
 typedef struct
 {
   char *mangled;
-  TypeKind ret;
+  Type ret;
 } Decl;
 
 static void collect_decls_expr(const Expr *e, const Project *proj, int concept_idx, Decl **decls,
@@ -1376,7 +1607,7 @@ static void collect_decls_expr(const Expr *e, const Project *proj, int concept_i
         break;
 
       /* Find return type from the target concept */
-      TypeKind ret = TYPE_VOID;
+      Type ret = type_prim(TYPE_VOID);
       const Concept *c = &proj->concepts[tgt];
       for (int i = 0; i < c->file_count; i++)
         for (int j = 0; j < c->files[i].program.fn_count; j++)
@@ -1434,6 +1665,10 @@ static void collect_decls_expr(const Expr *e, const Project *proj, int concept_i
       break;
     case EXPR_CAST:
       collect_decls_expr(e->as.cast.expr, proj, concept_idx, decls, count, cap);
+      break;
+    case EXPR_ARRAY_LIT:
+      for (int i = 0; i < e->as.array.count; i++)
+        collect_decls_expr(e->as.array.elems[i], proj, concept_idx, decls, count, cap);
       break;
     default:
       break;

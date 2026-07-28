@@ -92,6 +92,7 @@ run_e2e "ok_multi_concept"  42
 run_e2e "ok_str_eq"          0
 run_e2e "ok_helper_fns"     10
 run_e2e "ok_defer"         111
+run_e2e "ok_arrays"          0
 run_e2e_check_error "s001_recovery" "S001"
 
 echo ""

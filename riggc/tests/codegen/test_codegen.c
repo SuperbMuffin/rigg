@@ -284,6 +284,15 @@ static void test_defer(void)
   assert_ir_contains("defer", "main", "ret i32");
 }
 
+static void test_arrays(void)
+{
+  ASSERT(emit("arrays") == 0, "emit succeeded");
+  assert_ir_contains("arrays", "main", "alloca [3 x i32]");
+  assert_ir_contains("arrays", "main", "insertvalue [3 x i32]");
+  assert_ir_contains("arrays", "main", "getelementptr inbounds [3 x i32]");
+  assert_ir_contains("arrays", "main", "add i32 0, 3");
+}
+
 /* ── main ────────────────────────────────────────────────────────────────── */
 
 int main(void)
@@ -306,6 +315,7 @@ int main(void)
   run_test("cast_str", test_cast_str);
   run_test("numeric_edges", test_numeric_edges);
   run_test("defer", test_defer);
+  run_test("arrays", test_arrays);
 
   print_summary();
   return tc_suite_failed() > 0 ? 1 : 0;

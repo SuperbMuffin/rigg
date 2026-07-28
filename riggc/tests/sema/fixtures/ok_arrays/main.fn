@@ -1,0 +1,10 @@
+fn main() {
+    let a: [i32; 3] = [1, 2, 3];
+    let mut b = [1, 2, 3];
+    b[0] = 5;
+    let c = a[1];
+    let n = len(a);
+    let empty: [i32; 0] = [];
+    let board: [[i32; 2]; 2] = [[1, 2], [3, 4]];
+    let eq = [1, 2] == [1, 2];
+}
