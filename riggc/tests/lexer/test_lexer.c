@@ -32,7 +32,7 @@ static void assert_eof(Lexer *l)
 
 static void test_keywords(void)
 {
-  const char *src = "fn let mut const return if else for while loop break continue true false";
+  const char *src = "fn let mut const return if else for while loop break continue defer true false";
   Lexer l;
   lexer_init(&l, src);
   assert_tok(&l, TOK_FN, "fn");
@@ -47,6 +47,7 @@ static void test_keywords(void)
   assert_tok(&l, TOK_LOOP, "loop");
   assert_tok(&l, TOK_BREAK, "break");
   assert_tok(&l, TOK_CONTINUE, "continue");
+  assert_tok(&l, TOK_DEFER, "defer");
   assert_tok(&l, TOK_TRUE, "true");
   assert_tok(&l, TOK_FALSE, "false");
   assert_eof(&l);

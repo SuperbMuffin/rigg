@@ -518,6 +518,9 @@ static void check_block_imports(const Block *block, int concept_idx, const char 
       case STMT_LOOP:
         check_block_imports(&s->as.sloop.body, concept_idx, rel_path, proj, res);
         break;
+      case STMT_DEFER:
+        check_block_imports(&s->as.sdefer.body, concept_idx, rel_path, proj, res);
+        break;
       case STMT_EXPR:
         check_expr_imports(s->as.sexpr.expr, concept_idx, rel_path, proj, res);
         break;
@@ -1285,10 +1288,11 @@ static int block_always_returns(const Block *block)
 
 static void check_block_types(const Block *block, const FnDecl *fn, Scope *scope,
                               const char *rel_path, const SymTable *symt, int concept_idx,
-                              int loop_depth, SemaResult *res);
+                              int loop_depth, int in_defer, SemaResult *res);
 
 static void check_stmt_types(const Stmt *s, const FnDecl *fn, Scope *scope, const char *rel_path,
-                             const SymTable *symt, int concept_idx, int loop_depth, SemaResult *res)
+                             const SymTable *symt, int concept_idx, int loop_depth, int in_defer,
+                             SemaResult *res)
 {
   if (!s)
     return;
@@ -1328,6 +1332,11 @@ static void check_stmt_types(const Stmt *s, const FnDecl *fn, Scope *scope, cons
 
     case STMT_RETURN:
     {
+      if (in_defer)
+      {
+        push_error(res, "S004", rel_path, s->line, NULL, xstrdup("'return' used inside defer"));
+        break;
+      }
       if (fn->return_type == TYPE_VOID && s->as.ret.value)
       {
         push_error(res, "T004", rel_path, s->line,
@@ -1362,15 +1371,16 @@ static void check_stmt_types(const Stmt *s, const FnDecl *fn, Scope *scope, cons
     case STMT_IF:
       infer_expr(s->as.sif.cond, fn, scope, rel_path, symt, concept_idx, TYPE_UNKNOWN, res);
       check_block_types(&s->as.sif.then_block, fn, scope, rel_path, symt, concept_idx, loop_depth,
-                        res);
+                        in_defer, res);
       check_block_types(&s->as.sif.else_block, fn, scope, rel_path, symt, concept_idx, loop_depth,
-                        res);
+                        in_defer, res);
       break;
 
     case STMT_FOR:
     {
       int saved = scope->count;
-      check_stmt_types(s->as.sfor.init, fn, scope, rel_path, symt, concept_idx, loop_depth, res);
+      check_stmt_types(s->as.sfor.init, fn, scope, rel_path, symt, concept_idx, loop_depth,
+                       in_defer, res);
       TypeKind cond =
           infer_expr(s->as.sfor.cond, fn, scope, rel_path, symt, concept_idx, TYPE_UNKNOWN, res);
       if (cond != TYPE_UNKNOWN && cond != TYPE_BOOL)
@@ -1381,7 +1391,7 @@ static void check_stmt_types(const Stmt *s, const FnDecl *fn, Scope *scope, cons
       }
       infer_expr(s->as.sfor.post, fn, scope, rel_path, symt, concept_idx, TYPE_UNKNOWN, res);
       check_block_types(&s->as.sfor.body, fn, scope, rel_path, symt, concept_idx, loop_depth + 1,
-                        res);
+                        in_defer, res);
       scope->count = saved;
       break;
     }
@@ -1397,13 +1407,18 @@ static void check_stmt_types(const Stmt *s, const FnDecl *fn, Scope *scope, cons
                    xstrdup("Type mismatch"));
       }
       check_block_types(&s->as.swhile.body, fn, scope, rel_path, symt, concept_idx, loop_depth + 1,
-                        res);
+                        in_defer, res);
       break;
     }
 
     case STMT_LOOP:
       check_block_types(&s->as.sloop.body, fn, scope, rel_path, symt, concept_idx, loop_depth + 1,
-                        res);
+                        in_defer, res);
+      break;
+
+    case STMT_DEFER:
+      check_block_types(&s->as.sdefer.body, fn, scope, rel_path, symt, concept_idx, loop_depth,
+                        /*in_defer=*/1, res);
       break;
 
     case STMT_EXPR:
@@ -1412,7 +1427,13 @@ static void check_stmt_types(const Stmt *s, const FnDecl *fn, Scope *scope, cons
 
     case STMT_BREAK:
     case STMT_CONTINUE:
-      if (loop_depth == 0)
+      if (in_defer)
+      {
+        push_error(
+            res, "S004", rel_path, s->line, NULL,
+            xsprintf("'%s' used inside defer", s->kind == STMT_BREAK ? "break" : "continue"));
+      }
+      else if (loop_depth == 0)
       {
         push_error(
             res, "S004", rel_path, s->line, NULL,
@@ -1424,7 +1445,7 @@ static void check_stmt_types(const Stmt *s, const FnDecl *fn, Scope *scope, cons
 
 static void check_block_types(const Block *block, const FnDecl *fn, Scope *scope,
                               const char *rel_path, const SymTable *symt, int concept_idx,
-                              int loop_depth, SemaResult *res)
+                              int loop_depth, int in_defer, SemaResult *res)
 {
   /* NOTE (#11): scope uses a flat array with a count-restore to simulate block
      scoping. Variables declared in one branch of an if/else are pushed into the
@@ -1434,7 +1455,8 @@ static void check_block_types(const Block *block, const FnDecl *fn, Scope *scope
      block a fully isolated view. */
   int saved = scope->count;
   for (int i = 0; i < block->count; i++)
-    check_stmt_types(block->stmts[i], fn, scope, rel_path, symt, concept_idx, loop_depth, res);
+    check_stmt_types(block->stmts[i], fn, scope, rel_path, symt, concept_idx, loop_depth, in_defer,
+                     res);
   scope->count = saved;
 }
 
@@ -1446,7 +1468,7 @@ static void check_fn_types(const FnDecl *fn, const char *rel_path, const SymTabl
     scope_push(&scope, fn->params[i].name, fn->params[i].name_len, fn->params[i].type,
                /*is_mut=*/0);
 
-  check_block_types(&fn->body, fn, &scope, rel_path, symt, concept_idx, 0, res);
+  check_block_types(&fn->body, fn, &scope, rel_path, symt, concept_idx, 0, /*in_defer=*/0, res);
 
   if (fn->return_type != TYPE_VOID && !block_always_returns(&fn->body))
   {

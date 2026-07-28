@@ -276,6 +276,14 @@ static void test_numeric_edges(void)
   assert_ir_contains("numeric_edges", "main", "call i1 @rigg_str_to_bool(ptr");
 }
 
+static void test_defer(void)
+{
+  ASSERT(emit("defer") == 0, "emit succeeded");
+  /* deferred assignment materializes the literal then stores before ret */
+  assert_ir_contains("defer", "main", "add i32 0, 1");
+  assert_ir_contains("defer", "main", "ret i32");
+}
+
 /* ── main ────────────────────────────────────────────────────────────────── */
 
 int main(void)
@@ -297,6 +305,7 @@ int main(void)
   run_test("cast_int", test_cast_int);
   run_test("cast_str", test_cast_str);
   run_test("numeric_edges", test_numeric_edges);
+  run_test("defer", test_defer);
 
   print_summary();
   return tc_suite_failed() > 0 ? 1 : 0;

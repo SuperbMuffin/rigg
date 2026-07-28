@@ -277,6 +277,24 @@ continue;
 
 Valid only inside `while`, `for`, or `loop` blocks.
 
+### Defer
+
+```
+defer free(resource);
+```
+
+```
+defer:
+{
+    free(resource);
+    free(other);
+}
+```
+
+Both forms are valid. Deferred statements run when the enclosing scope exits
+(end of block, `return`, `break`, or `continue`), in LIFO order.
+`return`, `break`, and `continue` are not allowed inside a defer body.
+
 ---
 
 ## Return
@@ -337,8 +355,9 @@ fn main() -> i32
 ```
 fn       let      mut      const
 if       else     while    loop
-break    continue return   extern
-var      as       true     false
+break    continue defer    return
+extern   var      as       true
+false
 ```
 
 ---

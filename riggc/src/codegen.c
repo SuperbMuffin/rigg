@@ -134,11 +134,21 @@ typedef struct
 /* Loop frame for break/continue */
 typedef struct
 {
-  int continue_label; /* continue target */
-  int exit_label;     /* break target */
+  int continue_label;    /* continue target */
+  int exit_label;        /* break target */
+  int defer_frame_index; /* defer frame belonging to the loop body */
 } LoopFrame;
 
+/* One scope's list of deferred blocks (run LIFO on scope exit) */
+typedef struct
+{
+  const Block **blocks;
+  int count;
+  int cap;
+} DeferFrame;
+
 #define MAX_LOOPS 64
+#define MAX_DEFER_FRAMES 128
 
 typedef struct
 {
@@ -155,6 +165,9 @@ typedef struct
 
   LoopFrame loop_stack[MAX_LOOPS];
   int loop_depth;
+
+  DeferFrame defer_stack[MAX_DEFER_FRAMES];
+  int defer_depth;
 
   /* string literals accumulated for the current function, emitted at top of
      module after all function bodies — actually we emit them at module top,
@@ -186,6 +199,8 @@ static void cg_free(CG *cg)
   for (int i = 0; i < cg->str_count; i++)
     free(cg->str_literals[i].buf);
   free(cg->str_literals);
+  for (int i = 0; i < MAX_DEFER_FRAMES; i++)
+    free(cg->defer_stack[i].blocks);
 }
 
 static void emit(CG *cg, const char *fmt, ...)
@@ -1029,6 +1044,57 @@ static int emit_ptr_index_addr(CG *cg, int ptr_reg, const Expr *index_expr)
 
 /* statement codegen */
 
+static void emit_block(CG *cg, const Block *block, const FnDecl *fn);
+static void emit_stmt(CG *cg, const Stmt *s, const FnDecl *fn);
+
+static void push_defer_frame(CG *cg)
+{
+  if (cg->defer_depth >= MAX_DEFER_FRAMES)
+  {
+    fprintf(stderr, "rigg: defer nesting too deep\n");
+    abort();
+  }
+  cg->defer_stack[cg->defer_depth].count = 0;
+  cg->defer_depth++;
+}
+
+static void pop_defer_frame(CG *cg)
+{
+  if (cg->defer_depth <= 0)
+    return;
+  cg->defer_depth--;
+  cg->defer_stack[cg->defer_depth].count = 0;
+}
+
+static void defer_register(CG *cg, const Block *body)
+{
+  if (cg->defer_depth <= 0)
+    return;
+  DeferFrame *frame = &cg->defer_stack[cg->defer_depth - 1];
+  if (frame->count == frame->cap)
+  {
+    frame->cap = frame->cap ? frame->cap * 2 : 4;
+    frame->blocks = xrealloc(frame->blocks, (size_t) frame->cap * sizeof(const Block *));
+  }
+  frame->blocks[frame->count++] = body;
+}
+
+/* Emit deferred blocks in frame `idx` in LIFO order, then clear the frame. */
+static void emit_defer_frame(CG *cg, int idx, const FnDecl *fn)
+{
+  DeferFrame *frame = &cg->defer_stack[idx];
+  for (int i = frame->count - 1; i >= 0; i--)
+    emit_block(cg, frame->blocks[i], fn);
+  frame->count = 0;
+}
+
+/* Run and clear defer frames from the innermost down to `min_index` inclusive. */
+static void emit_defers_down_to(CG *cg, int min_index, const FnDecl *fn)
+{
+  for (int i = cg->defer_depth - 1; i >= min_index; i--)
+    emit_defer_frame(cg, i, fn);
+}
+
 static void emit_stmt(CG *cg, const Stmt *s, const FnDecl *fn)
 {
   if (!s)
@@ -1062,15 +1128,18 @@ static void emit_stmt(CG *cg, const Stmt *s, const FnDecl *fn)
 
     case STMT_RETURN:
     {
-      if (!s->as.ret.value || fn->return_type == TYPE_VOID)
-      {
+      int val = 0;
+      int has_val = s->as.ret.value && fn->return_type != TYPE_VOID;
+      if (has_val)
+        val = emit_expr(cg, s->as.ret.value, fn->return_type);
+
+      /* Run every enclosing scope's defers before leaving the function. */
+      emit_defers_down_to(cg, 0, fn);
+
+      if (!has_val)
         emit(cg, "  ret void\n");
-      }
       else
-      {
-        int val = emit_expr(cg, s->as.ret.value, fn->return_type);
         emit(cg, "  ret %s %%%d\n", ir_type(fn->return_type), val);
-      }
       cg->terminated = 1;
       break;
     }
@@ -1121,7 +1190,9 @@ static void emit_stmt(CG *cg, const Stmt *s, const FnDecl *fn)
       emit(cg, "  br i1 %%%d, label %%L%d, label %%L%d\n", cond, body_label, exit_label);
 
       emit(cg, "L%d:\n", body_label);
-      cg->loop_stack[cg->loop_depth++] = (LoopFrame){post_label, exit_label};
+      /* defer_frame_index is the frame emit_block is about to push */
+      cg->loop_stack[cg->loop_depth++] =
+          (LoopFrame){post_label, exit_label, cg->defer_depth};
       int body_saved = save_locals(cg);
       emit_block(cg, &s->as.sfor.body, fn);
       restore_locals(cg, body_saved);
@@ -1149,7 +1220,8 @@ static void emit_stmt(CG *cg, const Stmt *s, const FnDecl *fn)
       emit(cg, "  br i1 %%%d, label %%L%d, label %%L%d\n", cond, body_label, exit_label);
 
       emit(cg, "L%d:\n", body_label);
-      cg->loop_stack[cg->loop_depth++] = (LoopFrame){header_label, exit_label};
+      cg->loop_stack[cg->loop_depth++] =
+          (LoopFrame){header_label, exit_label, cg->defer_depth};
       int saved = save_locals(cg);
       emit_block(cg, &s->as.swhile.body, fn);
       restore_locals(cg, saved);
@@ -1168,7 +1240,8 @@ static void emit_stmt(CG *cg, const Stmt *s, const FnDecl *fn)
       emit(cg, "  br label %%L%d\n", header_label);
       emit(cg, "L%d:\n", header_label);
 
-      cg->loop_stack[cg->loop_depth++] = (LoopFrame){header_label, exit_label};
+      cg->loop_stack[cg->loop_depth++] =
+          (LoopFrame){header_label, exit_label, cg->defer_depth};
       int saved = save_locals(cg);
       emit_block(cg, &s->as.sloop.body, fn);
       restore_locals(cg, saved);
@@ -1181,8 +1254,9 @@ static void emit_stmt(CG *cg, const Stmt *s, const FnDecl *fn)
 
     case STMT_BREAK:
     {
-      int exit = cg->loop_stack[cg->loop_depth - 1].exit_label;
-      emit(cg, "  br label %%L%d\n", exit);
+      LoopFrame *frame = &cg->loop_stack[cg->loop_depth - 1];
+      emit_defers_down_to(cg, frame->defer_frame_index, fn);
+      emit(cg, "  br label %%L%d\n", frame->exit_label);
       /* Emit a dead block label so subsequent IR remains well-formed */
       emit(cg, "L%d:\n", new_label(cg));
       break;
@@ -1190,11 +1264,16 @@ static void emit_stmt(CG *cg, const Stmt *s, const FnDecl *fn)
 
     case STMT_CONTINUE:
     {
-      int cont = cg->loop_stack[cg->loop_depth - 1].continue_label;
-      emit(cg, "  br label %%L%d\n", cont);
+      LoopFrame *frame = &cg->loop_stack[cg->loop_depth - 1];
+      emit_defers_down_to(cg, frame->defer_frame_index, fn);
+      emit(cg, "  br label %%L%d\n", frame->continue_label);
       emit(cg, "L%d:\n", new_label(cg));
       break;
     }
+
+    case STMT_DEFER:
+      defer_register(cg, &s->as.sdefer.body);
+      break;
 
     case STMT_EXPR:
       emit_expr(cg, s->as.sexpr.expr, TYPE_UNKNOWN);
@@ -1204,8 +1283,13 @@ static void emit_stmt(CG *cg, const Stmt *s, const FnDecl *fn)
 
 static void emit_block(CG *cg, const Block *block, const FnDecl *fn)
 {
+  push_defer_frame(cg);
   for (int i = 0; i < block->count; i++)
     emit_stmt(cg, block->stmts[i], fn);
+  /* Normal scope exit: run this block's defers (no-op if already unwound). */
+  if (cg->defer_depth > 0)
+    emit_defer_frame(cg, cg->defer_depth - 1, fn);
+  pop_defer_frame(cg);
 }
 
 /* function codegen */
@@ -1216,6 +1300,7 @@ static void emit_fn(CG *cg, const FnDecl *fn, const char *concept_name)
   cg->reg = 0;
   cg->label = 0;
   cg->loop_depth = 0;
+  cg->defer_depth = 0;
   cg->terminated = 0;
   for (int i = 0; i < cg->local_count; i++)
     free(cg->locals[i].name);
@@ -1394,6 +1479,9 @@ static void collect_decls_stmt(const Stmt *s, const Project *proj, int concept_i
       break;
     case STMT_LOOP:
       collect_decls_block(&s->as.sloop.body, proj, concept_idx, decls, count, cap);
+      break;
+    case STMT_DEFER:
+      collect_decls_block(&s->as.sdefer.body, proj, concept_idx, decls, count, cap);
       break;
     default:
       break;

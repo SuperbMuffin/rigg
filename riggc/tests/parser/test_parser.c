@@ -614,6 +614,29 @@ static void test_for(void)
   parser_free(&p);
 }
 
+static void test_defer_stmt(void)
+{
+  Parser p;
+  Program prog = parse("fn f() { defer free(x); }", &p);
+  assert_ok(&p);
+  Stmt *s = prog.fns[0].body.stmts[0];
+  ASSERT(s->kind == STMT_DEFER, "is defer");
+  ASSERT(s->as.sdefer.body.count == 1, "body has one stmt");
+  ASSERT(s->as.sdefer.body.stmts[0]->kind == STMT_EXPR, "body is expr stmt");
+  parser_free(&p);
+}
+
+static void test_defer_block(void)
+{
+  Parser p;
+  Program prog = parse("fn f() { defer: { free(a); free(b); } }", &p);
+  assert_ok(&p);
+  Stmt *s = prog.fns[0].body.stmts[0];
+  ASSERT(s->kind == STMT_DEFER, "is defer");
+  ASSERT(s->as.sdefer.body.count == 2, "body has two stmts");
+  parser_free(&p);
+}
+
 /* -------------------------------------------------------------------------
  * line numbers on nodes
  * ---------------------------------------------------------------------- */
@@ -809,6 +832,8 @@ int main(void)
   run_test("for", test_for);
   run_test("loop", test_loop);
   run_test("continue", test_continue);
+  run_test("defer_stmt", test_defer_stmt);
+  run_test("defer_block", test_defer_block);
 
   /* line numbers */
   run_test("fn_line_number", test_fn_line_number);

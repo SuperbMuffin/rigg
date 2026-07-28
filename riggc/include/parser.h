@@ -131,6 +131,7 @@ typedef enum
   STMT_LOOP,
   STMT_BREAK,
   STMT_CONTINUE,
+  STMT_DEFER,
   STMT_EXPR,
 } StmtKind;
 
@@ -189,6 +190,10 @@ struct Stmt
     {
       Block body;
     } sloop;
+    struct
+    {
+      Block body;
+    } sdefer;
     struct
     {
       Expr *expr;

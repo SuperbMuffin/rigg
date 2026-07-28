@@ -19,6 +19,7 @@ typedef enum
   TOK_LOOP,
   TOK_BREAK,
   TOK_CONTINUE,
+  TOK_DEFER,
   TOK_EXTERN,
   TOK_VAR,
   TOK_TRUE,

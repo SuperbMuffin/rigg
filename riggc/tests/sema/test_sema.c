@@ -632,6 +632,37 @@ static void test_s004_continue_outside_loop(void)
   teardown(&proj, &res);
 }
 
+static void test_s004_return_in_defer(void)
+{
+  Project proj;
+  SemaResult res;
+  ASSERT(load("s004_return_in_defer", &proj, &res) == 0, "project_load succeeded");
+  assert_error(&res, "S004");
+  teardown(&proj, &res);
+}
+
+static void test_s004_break_in_defer(void)
+{
+  Project proj;
+  SemaResult res;
+  ASSERT(load("s004_break_in_defer", &proj, &res) == 0, "project_load succeeded");
+  assert_error(&res, "S004");
+  teardown(&proj, &res);
+}
+
+static void test_ok_defer(void)
+{
+  Project proj;
+  SemaResult res;
+  ASSERT(load("ok_defer", &proj, &res) == 0, "project_load succeeded");
+  if (res.count > 0)
+  {
+    sema_print(&res);
+    ASSERT(res.count == 0, "no spurious errors in defer fixture");
+  }
+  teardown(&proj, &res);
+}
+
 static void test_s004_not_emitted_in_loop(void)
 {
   /* break inside a while must not fire S004 */
@@ -741,6 +772,9 @@ int main(void)
   run_test("s004_break_outside_loop", test_s004_break_outside_loop);
   run_test("s004_continue_outside_loop", test_s004_continue_outside_loop);
   run_test("s004_not_emitted_in_loop", test_s004_not_emitted_in_loop);
+  run_test("s004_return_in_defer", test_s004_return_in_defer);
+  run_test("s004_break_in_defer", test_s004_break_in_defer);
+  run_test("ok_defer", test_ok_defer);
 
   /* s005 */
   run_test("s005_bare_return", test_s005_bare_return);

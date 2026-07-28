@@ -637,6 +637,30 @@ static Stmt *parse_loop(Parser *p)
   return s;
 }
 
+static Stmt *parse_defer(Parser *p)
+{
+  int line = p->current.line;
+  if (!expect(p, TOK_DEFER, "'defer'"))
+    return NULL;
+  Stmt *s = make_stmt(p, STMT_DEFER, line);
+  if (match(p, TOK_COLON))
+  {
+    s->as.sdefer.body = parse_block(p);
+  }
+  else
+  {
+    Stmt *inner = parse_stmt(p);
+    if (!inner && p->recovering)
+      return NULL;
+    Stmt **arena_s = arena_alloc(p, sizeof(Stmt *));
+    if (arena_s)
+      arena_s[0] = inner;
+    s->as.sdefer.body.stmts = arena_s;
+    s->as.sdefer.body.count = inner ? 1 : 0;
+  }
+  return s;
+}
+
 static Stmt *parse_stmt(Parser *p)
 {
   int line = p->current.line;
@@ -656,6 +680,8 @@ static Stmt *parse_stmt(Parser *p)
       return parse_while(p);
     case TOK_LOOP:
       return parse_loop(p);
+    case TOK_DEFER:
+      return parse_defer(p);
     case TOK_BREAK:
     {
       Stmt *s = make_stmt(p, STMT_BREAK, line);
@@ -1203,6 +1229,10 @@ static void dump_stmt(const Stmt *s, int depth)
     case STMT_LOOP:
       printf("Loop\n");
       dump_block(&s->as.sloop.body, depth + 1);
+      break;
+    case STMT_DEFER:
+      printf("Defer\n");
+      dump_block(&s->as.sdefer.body, depth + 1);
       break;
     case STMT_BREAK:
       printf("Break\n");

@@ -190,14 +190,21 @@ Error S001: Unexpected token '}'
   --> buffer/init.fn:14
 ```
 
-### S004 — Break or continue outside loop
+### S004 — Invalid break, continue, or return
 
-`break` or `continue` appears outside a `while`, `for`, or `loop` block.
+`break` or `continue` appears outside a `while`, `for`, or `loop` block, or
+`return` / `break` / `continue` appears inside a `defer` body.
 
 ```
 Error S004: 'break' used outside of a loop
 
   --> buffer/init.fn:7
+```
+
+```
+Error S004: 'return' used inside defer
+
+  --> buffer/init.fn:12
 ```
 
 ### S005 — Bare return in non-void function
